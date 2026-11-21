@@ -108,6 +108,14 @@ kiểm tra này. Build thông thường vẫn hiển thị cảnh báo `dllimpor
 starter trên Windows 64 bit. Không coi toàn bộ starter là đã sạch cảnh
 báo và không tắt cảnh báo chung để che chúng.
 
+## Lưu log có thể kiểm tra lại
+
+`tests/verify_dma.py` build vào một thư mục object mới, chạy các kiểm
+tra và giữ stdout/stderr nguyên byte, mã thoát, timeout, hash nguồn,
+hash binary và VCD nén. Lệnh đầy đủ và kết quả có cả phần thất bại ở
+[verification.md](verification.md). Đối chiếu yêu cầu toàn đề tại
+[requirements.md](requirements.md); chưa được đánh dấu toàn BTL đạt.
+
 ## Lỗi môi trường đã xác minh
 
 MinGW GCC 14.2 cũ trên máy chạy được một lần sao chép, nhưng crash khi

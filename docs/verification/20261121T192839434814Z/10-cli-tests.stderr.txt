@@ -1,0 +1,11 @@
+test_complete_data (test_dma_cli.DmaCliTests.test_complete_data)
+Short, unaligned and last-word copies must use the real callback. ... ok
+test_invalid_input (test_dma_cli.DmaCliTests.test_invalid_input)
+Reject overflow, overlap, invalid size and malformed CLI input. ... ok
+test_trace_and_failed_open (test_dma_cli.DmaCliTests.test_trace_and_failed_open)
+A trace-open failure must return an error and join the worker. ... ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.097s
+
+OK

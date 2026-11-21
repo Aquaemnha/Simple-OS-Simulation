@@ -12,6 +12,8 @@ riêng của bài kiểm thử. Bản này chưa phải demo toàn OS hoàn ch�
 
 Bản Word: [DMA-Co-processor.docx](DMA-Co-processor.docx).
 Cách build: [build.md](build.md). Kết quả chạy: [dma-results.txt](dma-results.txt).
+Log nguyên bản: [verification.md](verification.md).
+Đối chiếu toàn đề: [requirements.md](requirements.md).
 
 ## 1. Hiểu luồng chạy
 

@@ -1,67 +1,56 @@
-DMA verification - 2026-11-22 (Asia/Bangkok)
+DMA verification summary - 2026-11-22 (UTC+7)
 Branch: feature/dma-coprocessor
-Toolchain: w64devkit 2.11.0, GCC/G++ 16.2.0; Verilator runtime 5.020
-Build: C11 / C++17; supplied generated model unchanged.
+Tested base commit: cc92ca36936c93b421eb5c700bdfb4f4da95dedb
+Working-tree status and exact source hashes are recorded in the manifest.
+No C/C++ source changes in this verification checkpoint.
 
-Fresh build: make SHELL=sh OBJ=obj/review VERILATOR_ROOT=<5.020> os dma dma-tests dma-cpu-tests -j4
-Exit: 0
-DMA submit: PID 41 status -22
-PASS: descriptor boundaries, endianness, unaligned and final RAM word
-PASS: CPU MEMPHY and DMA callbacks share RAM, buffer reservation and lifetime
-PASS: four submitters, retained completion, repeated requests, large copy, drain and restart
-All DMA checks passed; CPU loop iterations=3304
-PASS: real CPU -> libmem -> PID syscall -> test MM mapping -> RTL -> RAM
-CALC instructions=65536, independent RAM checksum=8355840
+Canonical evidence:
+docs/verification/20261121T192839434814Z/manifest.json
+Started: 2026-11-21T19:28:39 UTC = 2026-11-22T02:28:39 UTC+7.
+Each command has unmodified stdout/stderr, exit code and timeout state.
+See docs/verification.md for links and the exact rerun command.
 
-DMA submit status -22 above is the intentional >32-bit length rejection.
-CPU integration uses a test MM mapping, not the unfinished MM64 implementation.
+Toolchain: w64devkit 2.11.0, GCC/G++ 16.2.0; Verilator runtime 5.020.
+Build: GNU C11 / C++17; supplied generated model unchanged.
 
-Command: dma_testbench.exe
-submit: pid=1 bus=0x1000 -> 0x2000 bytes=512
-interrupt: pid=1 status=0 bytes=512 callbacks=1
-CPU work before completion: 1387 batches, checksum=291336576
-Full data and unchanged source: PASS
-Exit: 0
+Results from that run:
+- Commands 01-14: exit 0. These are commands, not 14 independent tests.
+- Fresh OS/DMA build: exit 0; new object directory; warnings retained.
+- DMA C suite: 3 PASS groups; CPU loop iterations=4426.
+- CPU/libmem/PID syscall/engine/RAM suite: PASS.
+  CALC instructions after submit=65536; independent RAM checksum=8355840.
+  The mapper and page tables belong to the test, not the actual MM64.
+- Python CLI suite: 3 unittest methods, including subcases; OK.
+  unittest reports 0.097s; this is not a DMA throughput measurement.
+- Default copy: bytes=512, callbacks=1, status=0.
+  Full data and unchanged source: PASS.
+  CPU batches=1261; checksum=244533120.
+- Unaligned copy (1, 8193, 4): exit 0; full data check PASS.
+- Final RAM word (0, 1048572, 4): exit 0; full data check PASS.
+- Traced default copy: bytes=512, callbacks=1, status=0.
+  Full data and unchanged source: PASS.
+  CPU batches=4977; checksum=3332439936.
+- VCD: ch_done rising edges=1; max ch_bytes_transferred=512;
+  irq observed values=[0]. Completion uses the actual ch_done DPI callback.
+  No POSIX signal or asserted IRQ pin is claimed.
+- Command 15: os.exe os_1_mlq_paging_small_4K.
+  Timeout limit=5s; measured harness wall time=5.108297s.
+  Harness terminated the process; resulting exit code=1, timed_out=true.
+  stdout/stderr are empty; buffering may hide earlier output.
 
-Command: dma_testbench.exe 1 8193 4
-submit: pid=1 bus=0x1 -> 0x2001 bytes=4
-interrupt: pid=1 status=0 bytes=4 callbacks=1
-CPU work before completion: 98 batches, checksum=4415488
-Full data and unchanged source: PASS
-Exit: 0
+Overall runner exit: 1. DMA checks passed; full OS sample did not pass.
+CPU counts include time until completion consumption; they do not establish
+that every instruction overlapped active DMA or demonstrate any speedup.
 
-Command: dma_testbench.exe 0 1048572 4
-submit: pid=1 bus=0x0 -> 0xffffc bytes=4
-interrupt: pid=1 status=0 bytes=4 callbacks=1
-CPU work before completion: 116 batches, checksum=5493760
-Full data and unchanged source: PASS
-Exit: 0
+The first verification attempt failed to select the intended Windows tools.
+Its original evidence is kept at:
+docs/verification/20261121T192805117504Z/manifest.json
+No old binary was run in place of the failed build.
 
-Command: python -m unittest discover -s tests -p test_dma_cli.py -v
+Not a complete BTL submission. Actual MMU mapping, scheduler, user/kernel
+protection, MM statistics and the full OS demonstration remain incomplete.
+See docs/requirements.md for the requirement-by-requirement audit and
+docs/dma.md for the DMA integration contract.
 
-test_complete_data (test_dma_cli.DmaCliTests.test_complete_data)
-Short, unaligned and last-word copies must use the real callback. ... ok
-test_invalid_input (test_dma_cli.DmaCliTests.test_invalid_input)
-Reject overflow, overlap, invalid size and malformed CLI input. ... ok
-test_trace_and_failed_open (test_dma_cli.DmaCliTests.test_trace_and_failed_open)
-A trace-open failure must return an error and join the worker. ... ok
-
-----------------------------------------------------------------------
-Ran 3 tests in 0.107s
-
-OK
-Exit: 0
-
-Trace: default 512-byte copy; ch_done rising edges=1; max ch_bytes_transferred=512.
-irq pin disabled in supplied model; completion is the provided ch_done DPI callback.
-
-Full OS runtime: os os_1_mlq_paging_small_4K did not finish within 3 seconds.
-Not an end-to-end OS pass: supplied scheduler and MM64 TODOs remain.
-CPU work counts depend on host scheduling and are not performance benchmarks.
-
-GNU formatting review (same date):
-Owned DMA C/C++ syntax checks with -Wall -Wextra -Werror: exit 0.
-Rebuild os/dma/dma-tests/dma-cpu-tests: exit 0; all checks passed.
-DMA loop iterations=4696; CPU integration CALC=65536, checksum=8355840.
-CLI unittest: Ran 3 tests in 0.136s; OK.
-No functional changes in this formatting checkpoint.
+Earlier manually summarized runs remain in Git history. Their varying CPU
+counts and timings must not be mixed with the evidence run identified above.

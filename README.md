@@ -12,4 +12,6 @@ scheduler/MM work before an end-to-end demonstration.
 - [Word handoff](docs/DMA-Co-processor.docx)
 - [Build and test commands](docs/build.md)
 - [Recorded results and limitations](docs/dma-results.txt)
+- [Raw verification evidence and rerun command](docs/verification.md)
+- [Assignment requirements: verified and still missing](docs/requirements.md)
 - [Course starter provenance](docs/starter.md)
