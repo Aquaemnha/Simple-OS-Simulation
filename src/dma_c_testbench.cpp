@@ -26,14 +26,6 @@
 #include <cstdint>
 #include <cstring>
 #include <cstdbool>
-#include <thread>
-#include <atomic>
-
-// Generated DPI functions from RTL
-#include <verilated.h>
-#include <verilated_vcd_c.h>
-#include "Vdma_top.h"
-#include "Vdma_top__Dpi.h"  
 
 #if DMA_MAIN == 1
 extern "C" {
