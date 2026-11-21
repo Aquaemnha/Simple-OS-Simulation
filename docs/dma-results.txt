@@ -58,3 +58,10 @@ irq pin disabled in supplied model; completion is the provided ch_done DPI callb
 Full OS runtime: os os_1_mlq_paging_small_4K did not finish within 3 seconds.
 Not an end-to-end OS pass: supplied scheduler and MM64 TODOs remain.
 CPU work counts depend on host scheduling and are not performance benchmarks.
+
+GNU formatting review (same date):
+Owned DMA C/C++ syntax checks with -Wall -Wextra -Werror: exit 0.
+Rebuild os/dma/dma-tests/dma-cpu-tests: exit 0; all checks passed.
+DMA loop iterations=4696; CPU integration CALC=65536, checksum=8355840.
+CLI unittest: Ran 3 tests in 0.136s; OK.
+No functional changes in this formatting checkpoint.
