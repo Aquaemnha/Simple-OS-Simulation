@@ -17,6 +17,7 @@ static VerilatedContext *context;
 static VerilatedVcdC *tracer;
 static uint32_t last_bytes;
 
+/* Advance one clock edge using the worker's simulation context. */
 static void
 tick ()
 {

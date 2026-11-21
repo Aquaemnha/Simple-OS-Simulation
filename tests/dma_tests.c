@@ -1,4 +1,4 @@
-/* Real-model checks: boundaries, shared RAM, concurrent submit and shutdown. */
+/* Real-model checks: boundaries, shared RAM, concurrency and shutdown. */
 
 #include "common.h"
 #include "dma.h"
@@ -62,7 +62,9 @@ test_boundaries (void)
 
   assert (dma_start () == 0);
   assert (dma_start () == -EBUSY);
-  const uint64_t invalid_lengths[] = {0, 1, 3, 5, UINT32_MAX, UINT64_C (1) << 32};
+  const uint64_t invalid_lengths[] = {
+    0, 1, 3, 5, UINT32_MAX, UINT64_C (1) << 32
+  };
   for (size_t i = 0; i < sizeof invalid_lengths / sizeof *invalid_lengths; i++)
     assert (dma_submit (1, 0, 32, invalid_lengths[i]) == -EINVAL);
   assert (dma_submit (1, UINT64_MAX - 1, 32, 4) == -EFAULT);
@@ -89,7 +91,8 @@ test_boundaries (void)
   dma_shutdown ();
   dma_shutdown ();
   assert (memory_bank_cleanup () == 0);
-  puts ("PASS: descriptor boundaries, endianness, unaligned and final RAM word");
+  puts ("PASS: descriptor boundaries, endianness, "
+        "unaligned and final RAM word");
 }
 
 /* Deterministic reservation checks: dependent memory operations return busy,
@@ -126,16 +129,22 @@ test_shared_ram (void)
   assert (dma_start () == 0);
   assert (dma_submit (9, 1, 65, 4) == 0);
   finish_request ();
-  assert (MEMPHY_read (&ram, 65, &value) == 0 && (unsigned char) value == 0x81);
+  assert (MEMPHY_read (&ram, 65, &value) == 0
+          && (unsigned char) value == 0x81);
   assert (bytes[1] == 0x81 && bytes[65] == 0x81);
   dma_shutdown ();
   assert (memory_bank_cleanup () == 0);
   bytes[0] = 3; /* Cleanup borrowed RAM must not free its storage. */
-  puts ("PASS: CPU MEMPHY and DMA callbacks share RAM, buffer reservation and lifetime");
+  puts ("PASS: CPU MEMPHY and DMA callbacks share RAM, "
+        "buffer reservation and lifetime");
 }
 
 static pthread_barrier_t submit_barrier;
-struct submitter { uint32_t pid; int status; };
+struct submitter
+{
+  uint32_t pid;
+  int status;
+};
 
 static void *
 submit_concurrently (void *argument)
@@ -175,7 +184,10 @@ test_concurrency_and_shutdown (void)
     {
       assert (pthread_join (threads[i], NULL) == 0);
       if (submitters[i].status == 0)
-        { accepted++; winner = submitters[i].pid; }
+        {
+          accepted++;
+          winner = submitters[i].pid;
+        }
       else
         assert (submitters[i].status == -EBUSY);
     }
@@ -208,7 +220,8 @@ test_concurrency_and_shutdown (void)
   finish_request ();
   dma_shutdown ();
   assert (memory_bank_cleanup () == 0);
-  puts ("PASS: four submitters, retained completion, repeated requests, large copy, drain and restart");
+  puts ("PASS: four submitters, retained completion, repeated requests, "
+        "large copy, drain and restart");
 }
 
 int
@@ -217,6 +230,7 @@ main (void)
   test_boundaries ();
   test_shared_ram ();
   test_concurrency_and_shutdown ();
-  printf ("All DMA checks passed; CPU loop iterations=%" PRIu64 "\n", cpu_checksum);
+  printf ("All DMA checks passed; CPU loop iterations=%" PRIu64 "\n",
+          cpu_checksum);
   return 0;
 }

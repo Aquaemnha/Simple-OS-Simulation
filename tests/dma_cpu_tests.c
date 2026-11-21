@@ -133,14 +133,17 @@ main (void)
   assert (libmem_dma_memcpy (NULL, 1, 2, 0, 4) == -EINVAL);
   assert (libmem_dma_memcpy (&process, 1, 2, 0, 4) == -ENOSYS);
   kernel.dma_map_buffers = map_buffers;
-  assert (_syscall (&kernel, process.pid + 1, SYS_DMA_MEMCPY, &regs) == -ESRCH);
+  assert (_syscall (&kernel, process.pid + 1, SYS_DMA_MEMCPY, &regs)
+          == -ESRCH);
   assert (libmem_dma_memcpy (&process, 30, 2, 0, 4) == -EINVAL);
   assert (libmem_dma_memcpy (&process, 1, 2, 0, 3) == -EINVAL);
   assert (libmem_dma_memcpy (&process, 1, 2, UINT64_MAX, 4) == -EFAULT);
 #ifdef MM64
-  assert (libmem_dma_memcpy (&process, UINT64_C (1) << 32, 2, 0, 4) == -EINVAL);
+  assert (libmem_dma_memcpy (&process, UINT64_C (1) << 32, 2, 0, 4)
+          == -EINVAL);
   instructions[0].arg_3 = (UINT64_C (1) << 32) + 4;
-  assert (run (&process) == -EINVAL); /* CPU must not truncate 64-bit arguments. */
+  /* CPU must not truncate 64-bit arguments. */
+  assert (run (&process) == -EINVAL);
   process.pc = 0;
   instructions[0].arg_3 = TEST_LENGTH;
 #endif
@@ -192,8 +195,10 @@ main (void)
   assert (memory_bank_cleanup () == 0);
   free (bytes);
   free (instructions);
-  printf ("PASS: real CPU -> libmem -> PID syscall -> test MM mapping -> RTL -> RAM\n"
-          "CALC instructions=%" PRIu64 ", independent RAM checksum=%" PRIu64 "\n",
+  printf ("PASS: real CPU -> libmem -> PID syscall "
+          "-> test MM mapping -> RTL -> RAM\n"
+          "CALC instructions=%" PRIu64 ", independent RAM checksum=%"
+          PRIu64 "\n",
           calculations, checksum);
   return 0;
 }

@@ -14,6 +14,8 @@ enum channel_state
   DMA_COMPLETE
 };
 
+/* channel_lock protects the descriptor, completion and worker lifecycle.
+   Only the worker accesses the Verilator model; ready reports its startup. */
 static pthread_mutex_t channel_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t channel_changed = PTHREAD_COND_INITIALIZER;
 static pthread_t worker;
@@ -24,6 +26,7 @@ static int stopping;
 static int ready;
 static int init_status;
 
+/* Initialize the model, drain accepted requests and publish their results. */
 static void *
 dma_worker (void *unused)
 {
@@ -116,7 +119,8 @@ dma_start (void)
 }
 
 int
-dma_submit (uint32_t pid, uint64_t source, uint64_t destination, uint64_t length)
+dma_submit (uint32_t pid, uint64_t source, uint64_t destination,
+            uint64_t length)
 {
   int status;
 

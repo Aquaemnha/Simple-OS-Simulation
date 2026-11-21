@@ -14,6 +14,7 @@
 #include <time.h>
 
 #if DMA_MAIN
+/* Parse one nonnegative bus offset or length; reject trailing characters. */
 static int
 parse_number (const char *text, uint64_t *value)
 {
@@ -42,7 +43,8 @@ main (int argc, char **argv)
                     || parse_number (argv[2], &destination) != 0
                     || parse_number (argv[3], &length) != 0))
     {
-      std::fprintf (stderr, "Usage: %s [source destination length]\n", argv[0]);
+      std::fprintf (stderr, "Usage: %s [source destination length]\n",
+                    argv[0]);
       return 1;
     }
   if (length == 0 || length % 4 != 0 || source > bank_size
@@ -51,7 +53,8 @@ main (int argc, char **argv)
       || (source <= destination ? destination - source < length
                                 : source - destination < length))
     {
-      std::fprintf (stderr, "Invalid DMA range or length (use disjoint buffers, 4-byte length).\n");
+      std::fprintf (stderr, "Invalid DMA range or length "
+                    "(use disjoint buffers, 4-byte length).\n");
       return 1;
     }
   if (memory_bank_init (bank_size) == MEMORY_BANK_INVALID)
@@ -104,7 +107,8 @@ main (int argc, char **argv)
                result.interrupts);
   std::printf ("CPU work before completion: %lu batches, checksum=%llu\n",
                calculations, (unsigned long long) checksum);
-  std::printf ("Full data and unchanged source: %s\n", status == 0 ? "PASS" : "FAIL");
+  std::printf ("Full data and unchanged source: %s\n",
+               status == 0 ? "PASS" : "FAIL");
   memory_bank_cleanup ();
   return status == 0 ? 0 : 1;
 }

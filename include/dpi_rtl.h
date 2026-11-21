@@ -19,13 +19,15 @@
 extern "C" {
 #endif
 
-// Verilator RTL simulation functions
-int rtl_dma_init_simulation(void);
-void rtl_dma_cleanup_simulation(void);
-int dpi_rtl_dma_copy(uint64_t src_offset, uint64_t dst_offset, uint64_t length);
-int dpi_rtl_dma_is_available(void);
-uint32_t dpi_rtl_dma_bytes_transferred(void);
-void dma_done_callback(void);
+/* Used only by the DMA worker.  Errors are negative errno values.
+   Copy returns after clocking the model, including its completion callback. */
+int rtl_dma_init_simulation (void);
+void rtl_dma_cleanup_simulation (void);
+int dpi_rtl_dma_copy (uint64_t src_offset, uint64_t dst_offset,
+                      uint64_t length);
+int dpi_rtl_dma_is_available (void);
+uint32_t dpi_rtl_dma_bytes_transferred (void);
+void dma_done_callback (void);
 
 #ifdef __cplusplus
 }

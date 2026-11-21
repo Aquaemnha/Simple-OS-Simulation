@@ -11,6 +11,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* memory_lock protects storage and the active source/destination reservation.
+   bound_ram is borrowed from the OS; only a standalone bank owns storage. */
 static pthread_mutex_t memory_lock = PTHREAD_MUTEX_INITIALIZER;
 static unsigned char *storage;
 static size_t capacity;
@@ -22,12 +24,15 @@ static uint64_t dma_destination;
 static uint64_t dma_length;
 static int bus_error;
 
+/* Test a bus range without overflowing address + length. */
 static int
 range_valid (uint64_t address, uint64_t length)
 {
-  return storage != NULL && address <= capacity && length <= capacity - address;
+  return storage != NULL && address <= capacity
+         && length <= capacity - address;
 }
 
+/* Test two half-open ranges without adding either pair of endpoints. */
 static int
 overlaps (uint64_t a, uint64_t n, uint64_t b, uint64_t m)
 {
@@ -179,7 +184,8 @@ sysbus_dma_error (void)
 }
 
 int
-sysbus_range_pinned (struct memphy_struct *ram, uint64_t address, uint64_t length)
+sysbus_range_pinned (struct memphy_struct *ram, uint64_t address,
+                     uint64_t length)
 {
   int pinned;
 
@@ -192,7 +198,8 @@ sysbus_range_pinned (struct memphy_struct *ram, uint64_t address, uint64_t lengt
 }
 
 int
-sysbus_cpu_read (struct memphy_struct *ram, uint64_t address, unsigned char *value)
+sysbus_cpu_read (struct memphy_struct *ram, uint64_t address,
+                 unsigned char *value)
 {
   int status = 0;
 
@@ -210,7 +217,8 @@ sysbus_cpu_read (struct memphy_struct *ram, uint64_t address, unsigned char *val
 }
 
 int
-sysbus_cpu_write (struct memphy_struct *ram, uint64_t address, unsigned char value)
+sysbus_cpu_write (struct memphy_struct *ram, uint64_t address,
+                  unsigned char value)
 {
   int status = 0;
 
