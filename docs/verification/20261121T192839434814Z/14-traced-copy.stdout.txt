@@ -1,4 +1,0 @@
-submit: pid=1 bus=0x1000 -> 0x2000 bytes=512
-interrupt: pid=1 status=0 bytes=512 callbacks=1
-CPU work before completion: 4977 batches, checksum=3332439936
-Full data and unchanged source: PASS
