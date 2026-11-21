@@ -5,14 +5,14 @@
 #define MM64_BITS_PER_LONG 64
 
 #define PAGING64_CPU_BUS_WIDTH 57 /* 57 bit bus - MAX SPACE 4MB */
-#define PAGING64_PAGESZ  4096      /* 4KB or 12-bits PAGE NUMBER */
+#define PAGING64_PAGESZ 4096      /* 4KB or 12-bits PAGE NUMBER */
 
-#define GENMASK64(h, l) \
-	(((~0ULL) << (l)) & (~0ULL >> (MM64_BITS_PER_LONG  - (h) - 1)))
+#define GENMASK64(h, l)                                                       \
+  (((~0ULL) << (l)) & (~0ULL >> (MM64_BITS_PER_LONG - (h) - 1)))
 
-#define PAGING64_MAX_PGN  (DIV_ROUND_UP(BIT_ULL(21),PAGING64_PAGESZ))
-#define PAGING64_PAGE_ALIGNSZ(sz) (DIV_ROUND_UP(sz,PAGING64_PAGESZ)*PAGING64_PAGESZ)
-
+#define PAGING64_MAX_PGN (DIV_ROUND_UP (BIT_ULL (21), PAGING64_PAGESZ))
+#define PAGING64_PAGE_ALIGNSZ(sz)                                             \
+  (DIV_ROUND_UP (sz, PAGING64_PAGESZ) * PAGING64_PAGESZ)
 
 /* OFFSET */
 #define PAGING64_ADDR_OFFST_HIBIT 11
@@ -40,26 +40,44 @@
 #define PAGING64_ADDR_PGD_LOBIT 48
 
 /* Extract PGD Entry */
-#define PAGING64_ADDR_OFFST(addr) GETVAL(addr,PAGING64_ADDR_OFFST_MASK,PAGING_ADDR_OFFST_LOBIT)
-#define PAGING64_ADDR_PT(addr)   ((addr&PAGING64_ADDR_PT_MASK)>>PAGING64_ADDR_PT_LOBIT)
-//GETVAL(addr,PAGING64_ADDR_PT_MASK,PAGING64_ADDR_PT_LOBIT)
-#define PAGING64_ADDR_PMD(addr)   ((addr&PAGING64_ADDR_PMD_MASK)>>PAGING64_ADDR_PMD_LOBIT)
-//GETVAL(addr,PAGING64_ADDR_PMD_MASK,PAGING64_ADDR_PMD_LOBIT)
-#define PAGING64_ADDR_PUD(addr)   ((addr&PAGING64_ADDR_PUD_MASK)>>PAGING64_ADDR_PUD_LOBIT)
-//GETVAL(addr,PAGING64_ADDR_PUD_MASK,PAGING64_ADDR_PUD_LOBIT)
-#define PAGING64_ADDR_P4D(addr)   ((addr&PAGING64_ADDR_P4D_MASK)>>PAGING64_ADDR_P4D_LOBIT)
-//GETVAL(addr,PAGING64_ADDR_P4D_MASK,PAGING64_ADDR_P4D_LOBIT)
-#define PAGING64_ADDR_PGD(addr)   ((addr&PAGING64_ADDR_PGD_MASK)>>PAGING64_ADDR_PGD_LOBIT)
-//GETVAL(addr,PAGING64_ADDR_PGD_MASK,PAGING64_ADDR_PGD_LOBIT)
-
+#define PAGING64_ADDR_OFFST(addr) ((addr) & UINT64_C (0xfff))
+#define PAGING64_ADDR_PT(addr)                                                \
+  ((addr & PAGING64_ADDR_PT_MASK) >> PAGING64_ADDR_PT_LOBIT)
+// GETVAL(addr,PAGING64_ADDR_PT_MASK,PAGING64_ADDR_PT_LOBIT)
+#define PAGING64_ADDR_PMD(addr)                                               \
+  ((addr & PAGING64_ADDR_PMD_MASK) >> PAGING64_ADDR_PMD_LOBIT)
+// GETVAL(addr,PAGING64_ADDR_PMD_MASK,PAGING64_ADDR_PMD_LOBIT)
+#define PAGING64_ADDR_PUD(addr)                                               \
+  ((addr & PAGING64_ADDR_PUD_MASK) >> PAGING64_ADDR_PUD_LOBIT)
+// GETVAL(addr,PAGING64_ADDR_PUD_MASK,PAGING64_ADDR_PUD_LOBIT)
+#define PAGING64_ADDR_P4D(addr)                                               \
+  ((addr & PAGING64_ADDR_P4D_MASK) >> PAGING64_ADDR_P4D_LOBIT)
+// GETVAL(addr,PAGING64_ADDR_P4D_MASK,PAGING64_ADDR_P4D_LOBIT)
+#define PAGING64_ADDR_PGD(addr)                                               \
+  ((addr & PAGING64_ADDR_PGD_MASK) >> PAGING64_ADDR_PGD_LOBIT)
+// GETVAL(addr,PAGING64_ADDR_PGD_MASK,PAGING64_ADDR_PGD_LOBIT)
 
 /* Masks */
-#define PAGING64_ADDR_OFFST_MASK  GENMASK64(PAGING_ADDR_OFFST_HIBIT,PAGING_ADDR_OFFST_LOBIT)
-#define PAGING64_ADDR_PT_MASK  GENMASK64(PAGING64_ADDR_PT_HIBIT,PAGING64_ADDR_PT_LOBIT)
-#define PAGING64_ADDR_PMD_MASK  GENMASK64(PAGING64_ADDR_PMD_HIBIT,PAGING64_ADDR_PMD_LOBIT)
-#define PAGING64_ADDR_PUD_MASK  GENMASK64(PAGING64_ADDR_PUD_HIBIT,PAGING64_ADDR_PUD_LOBIT)
-#define PAGING64_ADDR_P4D_MASK  GENMASK64(PAGING64_ADDR_P4D_HIBIT,PAGING64_ADDR_P4D_LOBIT)
-#define PAGING64_ADDR_PGD_MASK  GENMASK64(PAGING64_ADDR_PGD_HIBIT,PAGING64_ADDR_PGD_LOBIT)
+#define PAGING64_ADDR_OFFST_MASK GENMASK64 (11, 0)
+#define PAGING64_ADDR_PT_MASK                                                 \
+  GENMASK64 (PAGING64_ADDR_PT_HIBIT, PAGING64_ADDR_PT_LOBIT)
+#define PAGING64_ADDR_PMD_MASK                                                \
+  GENMASK64 (PAGING64_ADDR_PMD_HIBIT, PAGING64_ADDR_PMD_LOBIT)
+#define PAGING64_ADDR_PUD_MASK                                                \
+  GENMASK64 (PAGING64_ADDR_PUD_HIBIT, PAGING64_ADDR_PUD_LOBIT)
+#define PAGING64_ADDR_P4D_MASK                                                \
+  GENMASK64 (PAGING64_ADDR_P4D_HIBIT, PAGING64_ADDR_P4D_LOBIT)
+#define PAGING64_ADDR_PGD_MASK                                                \
+  GENMASK64 (PAGING64_ADDR_PGD_HIBIT, PAGING64_ADDR_PGD_LOBIT)
 
+#define MM64_KERNEL_BASE UINT64_C (0xffff800000000000)
+#define MM64_USER_LIMIT (UINT64_C (1) << 56)
+
+int mm64_canonical (addr_t address);
+int mm64_translate (struct mm_struct *mm, struct memphy_struct *ram,
+                    addr_t address, addr_t *physical);
+void mm64_destroy (struct mm_struct *mm);
+int mm64_release_pages (struct mm_struct *mm, struct memphy_struct *ram);
+int mm64_map_contiguous (struct pcb_t *caller, addr_t address, addr_t size);
 
 #endif

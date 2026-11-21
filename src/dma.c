@@ -65,8 +65,10 @@ dma_worker (void *unused)
 
       pthread_mutex_lock (&channel_lock);
       current.interrupts = request.interrupts;
-      if (status == 0 && (current.interrupts != 1
-                         || current.bytes_transferred != current.length))
+      current.cpu_instructions = request.cpu_instructions;
+      if (status == 0
+          && (current.interrupts != 1
+              || current.bytes_transferred != current.length))
         status = -EIO;
       current.status = status;
       sysbus_dma_release ();
@@ -137,12 +139,10 @@ dma_submit (uint32_t pid, uint64_t source, uint64_t destination,
       status = sysbus_dma_reserve (source, destination, length);
       if (status == 0)
         {
-          request = (struct dma_result) {
-            .pid = pid,
-            .source = source,
-            .destination = destination,
-            .length = length
-          };
+          request = (struct dma_result) { .pid = pid,
+                                          .source = source,
+                                          .destination = destination,
+                                          .length = length };
           state = DMA_QUEUED;
           pthread_cond_signal (&channel_changed);
         }
@@ -198,6 +198,17 @@ dma_is_busy (void)
   busy = state != DMA_IDLE;
   pthread_mutex_unlock (&channel_lock);
   return busy;
+}
+
+/* Count completed CPU instructions only before the model reports ch_done.
+   QUEUED and COMPLETE (including delayed ACKs) contribute nothing. */
+void
+dma_record_cpu_instruction (void)
+{
+  pthread_mutex_lock (&channel_lock);
+  if (state == DMA_RUNNING && request.interrupts == 0)
+    request.cpu_instructions++;
+  pthread_mutex_unlock (&channel_lock);
 }
 
 void

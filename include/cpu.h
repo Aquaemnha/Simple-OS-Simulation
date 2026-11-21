@@ -4,13 +4,14 @@
 #include "common.h"
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
-/* Execute an instruction of a process. Return 0
- * if the instruction is executed successfully.
- * Otherwise, return 1. */
-int run(struct pcb_t * proc);
+  /* Successful instructions advance PC. -EBUSY/-EAGAIN leave PC unchanged so
+     the scheduler can run another process and retry later. Other errors fail.
+   */
+  int run (struct pcb_t *proc);
 
 #ifdef __cplusplus
 }

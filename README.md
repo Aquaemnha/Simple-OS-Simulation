@@ -29,9 +29,10 @@ make dma-tests dma-cpu-tests
 python -m unittest discover -s tests -p test_dma_cli.py -v
 ```
 
-The CPU test supplies its own memory mapper. The OS DMA syscall requires
-`krnl_t::dma_map_buffers` and returns `-ENOSYS` until a mapper is registered.
-Scheduler and MMU code still contain unimplemented starter sections.
+The CPU test uses the five-level MM64 page tables, PID registry and syscall
+path. It checks process isolation, user/kernel permissions, contiguous DMA
+spans, RAM exhaustion and CPU progress before the real model reports completion.
+The OS loader and scheduler still need integration with this memory path.
 
 ## License
 

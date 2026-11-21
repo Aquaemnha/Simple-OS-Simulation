@@ -9,129 +9,172 @@
  * CPU and co-processor module
  */
 #include "cpu.h"
+#include "dma.h"
+#include "libmem.h"
 #include "mem.h"
 #include "mm.h"
 #include "syscall.h"
-#include "libmem.h"
+#include <errno.h>
 
-int calc(struct pcb_t *proc)
+int
+calc (struct pcb_t *proc)
 {
-	return ((unsigned long)proc & 0UL);
+  (void) proc;
+  return 0;
 }
 
-int alloc(struct pcb_t *proc, uint32_t size, uint32_t reg_index)
+int
+alloc (struct pcb_t *proc, uint32_t size, uint32_t reg_index)
 {
-	addr_t addr = alloc_mem(size, proc);
-	if (addr == 0)
-	{
-		return 1;
-	}
-	else
-	{
-		proc->regs[reg_index] = addr;
-		return 0;
-	}
+  addr_t addr = alloc_mem (size, proc);
+  if (addr == 0)
+    {
+      return 1;
+    }
+  else
+    {
+      proc->regs[reg_index] = addr;
+      return 0;
+    }
 }
 
-int free_data(struct pcb_t *proc, uint32_t reg_index)
+int
+free_data (struct pcb_t *proc, uint32_t reg_index)
 {
-	return free_mem(proc->regs[reg_index], proc);
+  return free_mem (proc->regs[reg_index], proc);
 }
 
-int read(
-	struct pcb_t *proc, // Process executing the instruction
-	uint32_t source,	// Index of source register
-	uint32_t offset,	// Source address = [source] + [offset]
-	uint32_t destination)
+int
+read (struct pcb_t *proc, // Process executing the instruction
+      uint32_t source,    // Index of source register
+      uint32_t offset,    // Source address = [source] + [offset]
+      uint32_t destination)
 { // Index of destination register
 
-	BYTE data;
-	if (read_mem(proc->regs[source] + offset, proc, &data))
-	{
-		proc->regs[destination] = data;
-		return 0;
-	}
-	else
-	{
-		return 1;
-	}
+  BYTE data;
+  if (read_mem (proc->regs[source] + offset, proc, &data))
+    {
+      proc->regs[destination] = data;
+      return 0;
+    }
+  else
+    {
+      return 1;
+    }
 }
 
-int write(
-	struct pcb_t *proc,	// Process executing the instruction
-	BYTE data,		// Data to be wrttien into memory
-	uint32_t destination, // Index of destination register
-	uint32_t offset)
+int
+write (struct pcb_t *proc,   // Process executing the instruction
+       BYTE data,            // Data to be wrttien into memory
+       uint32_t destination, // Index of destination register
+       uint32_t offset)
 { // Destination address =
-	// [destination] + [offset]
-	return write_mem(proc->regs[destination] + offset, proc, data);
+  // [destination] + [offset]
+  return write_mem (proc->regs[destination] + offset, proc, data);
 }
 
-int run(struct pcb_t *proc)
+int
+run (struct pcb_t *proc)
 {
-	/* Check if Program Counter point to the proper instruction */
-	if (proc->pc >= proc->code->size)
-	{
-		return 1;
-	}
+  /* Check if Program Counter point to the proper instruction */
+  if (proc->pc >= proc->code->size)
+    {
+      return 1;
+    }
 
-	struct inst_t ins = proc->code->text[proc->pc];
-	proc->pc++;
-	int stat = 1;
-switch (ins.opcode)
-	{
-	case CALC:
-		stat = calc(proc);
-		break;
-	case ALLOC:
+  struct inst_t ins = proc->code->text[proc->pc];
+  int stat = 1;
+  switch (ins.opcode)
+    {
+    case CALC:
+      stat = calc (proc);
+      break;
+    case ALLOC:
+      if (ins.arg_1 >= 10)
+        return -EINVAL;
 #ifdef MM_PAGING
-		stat = liballoc(proc, ins.arg_0, ins.arg_1);
+      stat = liballoc (proc, ins.arg_0, ins.arg_1);
 #else
-		stat = alloc(proc, ins.arg_0, ins.arg_1);
+      stat = alloc (proc, ins.arg_0, ins.arg_1);
 #endif
-		break;
-#ifdef MM_PAGING		
-	case KMALLOC:
-		stat = libkmem_malloc(proc, ins.arg_0, ins.arg_1);
-		break;
-	case COPY_FROM_USER:
-		stat = libkmem_copy_from_user(proc, ins.arg_0, ins.arg_1, ins.arg_2, ins.arg_3);
-		break;
-	case COPY_TO_USER:
-		stat = libkmem_copy_to_user(proc, ins.arg_0, ins.arg_1, ins.arg_2, ins.arg_3);
-		break;
-	case DMA_MEMCPY:
-		stat = libmem_dma_memcpy(proc, ins.arg_0, ins.arg_1, ins.arg_2, ins.arg_3);
-		if (stat != 0)
-			fprintf (stderr, "DMA submit: PID %u status %d\n", proc->pid, stat);
-		break;
-#endif
-	case FREE:
+      break;
 #ifdef MM_PAGING
-		stat = libfree(proc, ins.arg_0);
-#else
-		stat = free_data(proc, ins.arg_0);
+    case KMALLOC:
+      if (ins.arg_1 >= 10)
+        return -EINVAL;
+      stat = libkmem_malloc (proc, ins.arg_0, ins.arg_1);
+      break;
+    case COPY_FROM_USER:
+      if (ins.arg_0 >= PAGING_MAX_SYMTBL_SZ
+          || ins.arg_1 >= PAGING_MAX_SYMTBL_SZ)
+        return -EINVAL;
+      stat = libkmem_copy_from_user (proc, ins.arg_0, ins.arg_1, ins.arg_2,
+                                     ins.arg_3);
+      break;
+    case COPY_TO_USER:
+      if (ins.arg_0 >= PAGING_MAX_SYMTBL_SZ
+          || ins.arg_1 >= PAGING_MAX_SYMTBL_SZ)
+        return -EINVAL;
+      stat = libkmem_copy_to_user (proc, ins.arg_0, ins.arg_1, ins.arg_2,
+                                   ins.arg_3);
+      break;
+    case DMA_MEMCPY:
+      stat = libmem_dma_memcpy (proc, ins.arg_0, ins.arg_1, ins.arg_2,
+                                ins.arg_3);
+      break;
 #endif
-		break;
-	case READ:
+    case FREE:
+      if (ins.arg_0 >= PAGING_MAX_SYMTBL_SZ)
+        return -EINVAL;
 #ifdef MM_PAGING
-		stat = libread(proc, ins.arg_0, ins.arg_1, (uint32_t*) &ins.arg_2);
+      stat = libfree (proc, ins.arg_0);
 #else
-		stat = read(proc, ins.arg_0, ins.arg_1, ins.arg_2);
+      stat = free_data (proc, ins.arg_0);
 #endif
-		break;
-	case WRITE:
+      break;
+    case READ:
 #ifdef MM_PAGING
-		stat = libwrite(proc, ins.arg_0, ins.arg_1, ins.arg_2);
-#else
-		stat = write(proc, ins.arg_0, ins.arg_1, ins.arg_2);
+      {
+        uint32_t value;
+        if (ins.arg_0 >= PAGING_MAX_SYMTBL_SZ || ins.arg_2 >= 10)
+          return -EINVAL;
+        stat = libread (proc, ins.arg_0, ins.arg_1, &value);
+        if (stat == 0)
+          {
+            proc->regs[ins.arg_2] = value;
+#ifdef IODUMP
+            printf ("READ PID %u region " FORMAT_ADDR " offset " FORMAT_ADDR
+                    " value %u\n",
+                    proc->pid, ins.arg_0, ins.arg_1, value);
 #endif
-		break;
-	case SYSCALL:
-		stat = libsyscall(proc, ins.arg_0, ins.arg_1, ins.arg_2, ins.arg_3);
-		break;
-	default:
-		stat = 1;
-	}
-	return stat;
+          }
+      }
+#else
+      stat = read (proc, ins.arg_0, ins.arg_1, ins.arg_2);
+#endif
+      break;
+    case WRITE:
+      if (ins.arg_0 > 255 || ins.arg_1 >= PAGING_MAX_SYMTBL_SZ)
+        return -EINVAL;
+#ifdef MM_PAGING
+      stat = libwrite (proc, ins.arg_0, ins.arg_1, ins.arg_2);
+#else
+      stat = write (proc, ins.arg_0, ins.arg_1, ins.arg_2);
+#endif
+      break;
+    case SYSCALL:
+      if (ins.arg_0 > UINT32_MAX)
+        return -EINVAL;
+      stat = libsyscall (proc, ins.arg_0, ins.arg_1, ins.arg_2, ins.arg_3);
+      break;
+    default:
+      stat = 1;
+    }
+  if (stat == 0)
+    {
+      proc->pc++;
+      if (ins.opcode != DMA_MEMCPY)
+        dma_record_cpu_instruction ();
+    }
+  return stat;
 }
