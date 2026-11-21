@@ -23,14 +23,14 @@ vpath %.cpp $(SRC)
 vpath %.h $(INCLUDE)
 
 CFLAGS =   -std=gnu11 -c $(DEBUG)
-CXXFLAGS = -std=gnu++14 -c $(DEBUG)
+CXXFLAGS = -std=gnu++17 -c $(DEBUG)
 
 # Verilator configuration
 VERILATOR_ROOT ?= /usr/share/verilator
 ifeq ($(shell uname -s),Darwin)
     ifeq ($(shell uname -m),arm64)
         CFLAGS = -Wall -c $(DEBUG)
-        CXXFLAGS = -Wall -std=c++14 -c $(DEBUG)
+        CXXFLAGS = -Wall -std=c++17 -c $(DEBUG)
 	ifneq ($(wildcard /usr/local/share/verilator/include/verilated.h),)
             VERILATOR_ROOT := /usr/local/share/verilator
 	else
@@ -47,7 +47,7 @@ CXX_MAKE = $(CXX) -DVL_TIME_CONTEXT -iquote include -I$(VERILATOR_ROOT)/include 
 
 # Object files needed by modules
 MEM_OBJ = $(addprefix $(OBJ)/, paging.o mem.o cpu.o loader.o)
-SYSCALL_OBJ = $(addprefix $(OBJ)/, syscall.o  sys_mem.o sys_listsyscall.o)
+SYSCALL_OBJ = $(addprefix $(OBJ)/, syscall.o sys_mem.o sys_listsyscall.o sys_dma.o)
 OS_OBJ = $(addprefix $(OBJ)/, cpu.o mem.o loader.o queue.o os.o sched.o timer.o mm-vm.o mm64.o mm.o mm-memphy.o libstd.o libmem.o)
 OS_OBJ += $(SYSCALL_OBJ)
 
@@ -65,7 +65,7 @@ VDMA_OBJ_SLOW = $(addprefix $(OBJ)/, $(addsuffix .o, $(VDMA_CLASSES_SLOW) $(VDMA
 VDMA_USER_CLASSES = dpi_rtl sysbus dma_c_testbench
 VDMA_USER_OBJ = $(addprefix $(OBJ)/, $(addsuffix .o, $(VDMA_USER_CLASSES)))
 
-# For OS target: dma_c_testbench compiled with DMA_MAIN=0 (default)
+# The OS links the service, not the standalone testbench.
 VDMA_USER_OBJ_OS = $(OBJ)/dpi_rtl.o $(OBJ)/sysbus.o $(OBJ)/dma.o
 # For DMA target: dma_c_testbench compiled with DMA_MAIN=1
 VDMA_USER_OBJ_DMA = $(OBJ)/dpi_rtl.o $(OBJ)/sysbus.o $(OBJ)/dma.o $(OBJ)/dma_c_testbench_dma.o
@@ -102,25 +102,33 @@ dma-tests: $(OBJ)/dma_tests.o $(OBJ)/mm-memphy.o $(VDMA_OBJ_OS)
 $(OBJ)/dma_tests.o: tests/dma_tests.c $(HEADER) | $(OBJ)
 	$(MAKE) $(CFLAGS) $< -o $@
 
+.PHONY: dma-cpu-tests
+dma-cpu-tests: $(OBJ)/dma_cpu_tests.o $(filter-out $(OBJ)/os.o,$(OS_OBJ))
+	$(CXX) $(LFLAGS) $^ -o dma_cpu_tests $(LIB)
+	./dma_cpu_tests
+
+$(OBJ)/dma_cpu_tests.o: tests/dma_cpu_tests.c $(HEADER) | $(OBJ)
+	$(MAKE) $(CFLAGS) $< -o $@
+
 # Compile dma_c_testbench with DMA_MAIN=1 for standalone testbench
-$(OBJ)/dma_c_testbench_dma.o: src/dma_c_testbench.cpp ${HEADER} $(OBJ)
+$(OBJ)/dma_c_testbench_dma.o: src/dma_c_testbench.cpp ${HEADER} | $(OBJ)
 	$(CXX_MAKE) $(CXXFLAGS) -DDEBUG_ENABLED=1 -DDMA_MAIN=1 $< -o $@
 
 # Compile syscall
-syscalltbl.lst: $(SRC)/syscall.tbl
-	@echo $(OS_OBJ)
-	chmod +x $(SRC)/syscalltbl.sh
-	$(SRC)/syscalltbl.sh $< $(SRC)/$@
+$(SRC)/syscalltbl.lst: $(SRC)/syscall.tbl $(SRC)/syscalltbl.sh
+	sh $(SRC)/syscalltbl.sh $< $@
 #	mv $(OBJ)/syscalltbl.lst $(INCLUDE)/
 
 # Compile the whole OS simulation
-os: $(OBJ) syscalltbl.lst $(OS_OBJ)
+$(OBJ)/syscall.o: $(SRC)/syscalltbl.lst
+
+os: $(OS_OBJ)
 	$(CXX) $(LFLAGS) $(OS_OBJ) -o os $(LIB) -lpthread
 
-$(OBJ)/%.o: %.c ${HEADER} $(OBJ)
+$(OBJ)/%.o: %.c ${HEADER} | $(OBJ)
 	$(MAKE) $(CFLAGS) $< -o $@
 
-$(OBJ)/%.o: %.cpp ${HEADER} $(OBJ)
+$(OBJ)/%.o: %.cpp ${HEADER} | $(OBJ)
 	$(CXX_MAKE) $(CXXFLAGS) -DDEBUG_ENABLED=1 $< -o $@
 
 # Compile dma_c_testbench for OS target with DMA_MAIN=0 (library mode)

@@ -9,6 +9,10 @@
  */
 
 #include "common.h"
+#include <pthread.h>
+
+/* Serialize allocation/free, DMA buffer mapping and reservation. */
+extern pthread_mutex_t mmvm_lock;
 
 #define SYSMEM_MAP_OP 1
 #define SYSMEM_INC_OP 2
@@ -19,9 +23,10 @@
 extern struct vm_area_struct *get_vma_by_num(struct mm_struct *mm, int vmaid);
 int liballoc(struct pcb_t *, addr_t, uint32_t);
 int libfree(struct pcb_t *, uint32_t);
+int free_pcb_memph (struct pcb_t *);
 int libread(struct pcb_t*, uint32_t, addr_t, uint32_t*);
 int libwrite(struct pcb_t*, BYTE, uint32_t, addr_t);
 int libkmem_malloc(struct pcb_t*, uint32_t, uint32_t);
 int libkmem_copy_from_user(struct pcb_t*, uint32_t, uint32_t, uint32_t, uint32_t);
 int libkmem_copy_to_user(struct pcb_t*, uint32_t, uint32_t, uint32_t, uint32_t);
-int libmem_dma_memcpy(struct pcb_t*, uint32_t, uint32_t, uint32_t, uint32_t);
+int libmem_dma_memcpy (struct pcb_t *, arg_t, arg_t, arg_t, arg_t);

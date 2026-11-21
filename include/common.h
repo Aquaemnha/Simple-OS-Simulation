@@ -57,7 +57,7 @@ enum ins_opcode_t
 	KMALLOC,           // Allocate kernel memory
 	COPY_FROM_USER,    // Copy data from user memregion to kernel memregion
 	COPY_TO_USER,      // Copy data from kernel memregion to user memregion
-	DMA_MEMCPY, // Create kernel cache pool
+	DMA_MEMCPY, // Submit an asynchronous memory copy
 	SYSCALL,
 };
 
@@ -136,6 +136,15 @@ struct krnl_t
 	struct memphy_struct *active_mswp;
 	uint32_t active_mswp_id;
 	struct kcache_pool_struct *kcpooltbl;
+
+  /* MM supplies this adapter after PID lookup and page-table translation.
+     Called with mmvm_lock held. Validate region ownership, bounds, access
+     permissions and physically contiguous, resident RAM spans. Never return
+     a host pointer or treat a user virtual address as a bus address. */
+  int (*dma_map_buffers) (struct krnl_t *krnl, uint32_t pid,
+                         uint32_t source_region, uint32_t destination_region,
+                         uint64_t offset, uint64_t length,
+                         uint64_t *source_bus, uint64_t *destination_bus);
 	
 #ifdef MM64
 	addr_t *krnl_pgd;

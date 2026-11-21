@@ -10,6 +10,8 @@
 
 #include "common.h"
 
+#define SYS_DMA_MEMCPY 18
+
 
 struct sc_regs {
         arg_t a1;

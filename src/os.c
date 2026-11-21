@@ -25,7 +25,7 @@
 #include <stdbool.h>
 
 #include "sysbus.h"
-#include "dpi_rtl.h"
+#include "dma.h"
 
 static int time_slot;
 static int num_cpus;
@@ -61,6 +61,18 @@ struct cpu_args {
 	int id;
 };
 
+/* Called between CPU instructions, outside the RTL worker's callback. */
+static void
+handle_dma_interrupt (void)
+{
+  struct dma_result result;
+
+  if (dma_take_completion (&result) == 1)
+    printf ("\tDMA interrupt: PID %u status %d bytes %u callbacks %u\n",
+            result.pid, result.status, result.bytes_transferred,
+            result.interrupts);
+}
+
 static void * cpu_routine(void * args) {
 	struct timer_id_t * timer_id = ((struct cpu_args*)args)->timer_id;
 	int id = ((struct cpu_args*)args)->id;
@@ -68,6 +80,7 @@ static void * cpu_routine(void * args) {
 	int time_left = 0;
 	struct pcb_t * proc = NULL;
 	while (1) {
+		handle_dma_interrupt ();
 		/* Check the status of current process */
 		if (proc == NULL) {
 			/* No process is running, the we load new process from
@@ -78,10 +91,14 @@ static void * cpu_routine(void * args) {
                            continue; /* First load failed. skip dummy load */
                         }
 		}else if (proc->pc == proc->code->size) {
-			/* The porcess has finish it job */
-			printf("\tCPU %d: Processed %2d has finished\n",
-				id ,proc->pid);
-			free(proc);
+			/* Keep DMA buffers alive; let other processes use this CPU. */
+			if (dma_pid_busy (proc->pid))
+				put_proc (proc);
+			else {
+				printf("\tCPU %d: Processed %2d has finished\n",
+					id, proc->pid);
+				free(proc);
+			}
 			proc = get_proc();
 			time_left = 0;
 		}else if (time_left == 0) {
@@ -117,24 +134,6 @@ static void * cpu_routine(void * args) {
 	pthread_exit(NULL);
 }
 
-
-static void * co_processor(void *arg) {
-    (void)arg;
-    /* TODO: Initialize the internal Verilator RTL simulation.
-	 *       This is necessary to ensure that the RTL simulation is ready for DPI calls.
-      */
-    if (rtl_dma_init_simulation() != 0) {
-        printf("Cannot initialize RTL simulation\n");
-        return (void*)1;
-    }
-	
-	/* TODO: This asynchronous implementation of DMA
-     *        DMA completion callback is not yet implemented in this testbench
-     */
-    // Install callback handler
-    //dma_done_callback();  // Call the callback to signal DMA completion
-    return NULL;
-}
 
 static void * ld_routine(void * args) {
 #ifdef MM_PAGING
@@ -258,19 +257,11 @@ int main(int argc, char * argv[]) {
 	read_config(path);
 
 	pthread_t * cpu = (pthread_t*)malloc(num_cpus * sizeof(pthread_t));
-	pthread_t * dma = (pthread_t*)malloc(sizeof(pthread_t));
 	struct cpu_args * args =
 		(struct cpu_args*)malloc(sizeof(struct cpu_args) * num_cpus);
 	pthread_t ld;
 	
-	/* Init timer */
 	int i;
-	for (i = 0; i < num_cpus; i++) {
-		args[i].timer_id = attach_event();
-		args[i].id = i;
-	}
-	struct timer_id_t * ld_event = attach_event();
-	start_timer();
 
 #ifdef MM_PAGING
 	/* Init all MEMPHY include 1 MEMRAM and n of MEMSWP */
@@ -282,6 +273,20 @@ int main(int argc, char * argv[]) {
 	/* Create MEM RAM */
 	init_memphy(&mram, memramsz, rdmflag);
 
+  /* Bind the same physical RAM that CPU MEMPHY accesses use. Complete RTL
+     initialization before any CPU can submit a descriptor. */
+  int dma_status = sysbus_bind_ram (&mram);
+  if (dma_status == 0)
+    dma_status = dma_start ();
+  if (dma_status != 0)
+    {
+      fprintf (stderr, "Cannot start DMA: %d\n", dma_status);
+      memory_bank_cleanup ();
+      free (cpu);
+      free (args);
+      return 1;
+    }
+
         /* Create all MEM SWAP */ 
 	int sit;
 	for(sit = 0; sit < PAGING_MAX_MMSWP; sit++)
@@ -290,7 +295,6 @@ int main(int argc, char * argv[]) {
 	/* In Paging mode, it needs passing the system mem to each PCB through loader*/
 	struct mmpaging_ld_args *mm_ld_args = (struct mmpaging_ld_args*)malloc(sizeof(struct mmpaging_ld_args));
 
-	mm_ld_args->timer_id = ld_event;
 	mm_ld_args->mram = (struct memphy_struct *) &mram;
 	mm_ld_args->mswp = (struct memphy_struct**) &mswp;
 	mm_ld_args->active_mswp = (struct memphy_struct *) &mswp[0];
@@ -301,6 +305,17 @@ int main(int argc, char * argv[]) {
 
 	/* Init scheduler */
 	init_scheduler();
+
+  /* Start the timer only after DMA initialization has succeeded. */
+  for (i = 0; i < num_cpus; i++) {
+    args[i].timer_id = attach_event();
+    args[i].id = i;
+  }
+  struct timer_id_t *ld_event = attach_event();
+#ifdef MM_PAGING
+  mm_ld_args->timer_id = ld_event;
+#endif
+  start_timer();
 
 	/* Run CPU and loader */
 #ifdef MM_PAGING
@@ -313,14 +328,15 @@ int main(int argc, char * argv[]) {
 			cpu_routine, (void*)&args[i]);
 	}
 
-	/* Run co-processor */
-	pthread_create(dma, NULL, co_processor, NULL);
-
 	/* Wait for CPU and loader finishing */
 	for (i = 0; i < num_cpus; i++) {
 		pthread_join(cpu[i], NULL);
 	}
 	pthread_join(ld, NULL);
+
+  dma_shutdown ();
+  handle_dma_interrupt ();
+  memory_bank_cleanup ();
 
 	/* Stop timer */
 	stop_timer();

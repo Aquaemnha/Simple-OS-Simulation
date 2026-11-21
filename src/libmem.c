@@ -21,8 +21,9 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <errno.h>
 
-static pthread_mutex_t mmvm_lock = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t mmvm_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t kmm_lock = PTHREAD_MUTEX_INITIALIZER;
 
 /*enlist_vm_freerg_list - add new rg to freerg_list
@@ -53,7 +54,7 @@ int enlist_vm_freerg_list(struct mm_struct *mm, struct vm_rg_struct *rg_elmt)
  */
 struct vm_rg_struct *get_symrg_byid(struct mm_struct *mm, int rgid)
 {
-  if (rgid < 0 || rgid > PAGING_MAX_SYMTBL_SZ)
+  if (rgid < 0 || rgid >= PAGING_MAX_SYMTBL_SZ)
     return NULL;
 
   return &mm->symrgtbl[rgid];
@@ -71,6 +72,11 @@ int __alloc(struct pcb_t *caller, int vmaid, int rgid, addr_t size, addr_t *allo
 {
   /*Allocate at the toproof */
   pthread_mutex_lock(&mmvm_lock);
+  if (dma_pid_busy (caller->pid))
+  {
+    pthread_mutex_unlock (&mmvm_lock);
+    return -EBUSY;
+  }
   struct vm_rg_struct rgnode;
   struct vm_area_struct *cur_vma = get_vma_by_num(caller->mm, vmaid);
   int inc_sz=0;
@@ -134,7 +140,13 @@ int __free(struct pcb_t *caller, int vmaid, int rgid)
 {
   pthread_mutex_lock(&mmvm_lock);
 
-  if (rgid < 0 || rgid > PAGING_MAX_SYMTBL_SZ)
+  if (dma_pid_busy (caller->pid))
+  {
+    pthread_mutex_unlock (&mmvm_lock);
+    return -EBUSY;
+  }
+
+  if (rgid < 0 || rgid >= PAGING_MAX_SYMTBL_SZ)
   {
     pthread_mutex_unlock(&mmvm_lock);
     return -1;
@@ -196,9 +208,9 @@ int liballoc(struct pcb_t *proc, addr_t size, uint32_t reg_index)
 int libfree(struct pcb_t *proc, uint32_t reg_index)
 {
   int val = __free(proc, 0, reg_index);
-  if (val == -1)
+  if (val != 0)
   {
-    return -1;
+    return val;
   }
 printf("%s:%d\n",__func__,__LINE__);
 #ifdef IODUMP
@@ -464,21 +476,19 @@ addr_t __kmalloc(struct pcb_t *caller, int vmaid, int rgid, addr_t size, addr_t 
  *@offset: memory offset
  *@size: copied data size
  */
-int libmem_dma_memcpy(struct pcb_t *caller, uint32_t src, uint32_t dst, uint32_t offset, uint32_t size)
+int
+libmem_dma_memcpy (struct pcb_t *caller, arg_t src, arg_t dst,
+                   arg_t offset, arg_t size)
 {
-  /* TODO: provide DMA mempy */
+  struct sc_regs regs = {0};
 
-  //struct krnl_t *krnl = caller->krnl;
-
-  /*
-   *  TODO: provide asynchronous dma memcpy
-   *        handling the dma_done_callback
-   */
-  //do_dma(caller, (uint64_t) src, (uint64_t) dst, (uint64_t) size);
-  //krnl->...
-  //krnl->...
-
-  return 0;
+  if (caller == NULL || caller->krnl == NULL)
+    return -EINVAL;
+  regs.a1 = src;
+  regs.a2 = dst;
+  regs.a3 = offset;
+  regs.a4 = size;
+  return _syscall (caller->krnl, caller->pid, SYS_DMA_MEMCPY, &regs);
 }
 
 
@@ -579,6 +589,11 @@ int __write_user_mem(struct pcb_t *caller, int vmaid, int rgid, addr_t offset, B
 int free_pcb_memph(struct pcb_t *caller)
 {
   pthread_mutex_lock(&mmvm_lock);
+  if (dma_pid_busy (caller->pid))
+  {
+    pthread_mutex_unlock (&mmvm_lock);
+    return -EBUSY;
+  }
   int pagenum, fpn;
   uint32_t pte;
 

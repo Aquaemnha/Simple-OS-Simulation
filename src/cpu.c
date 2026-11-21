@@ -102,6 +102,8 @@ switch (ins.opcode)
 		break;
 	case DMA_MEMCPY:
 		stat = libmem_dma_memcpy(proc, ins.arg_0, ins.arg_1, ins.arg_2, ins.arg_3);
+		if (stat != 0)
+			fprintf (stderr, "DMA submit: PID %u status %d\n", proc->pid, stat);
 		break;
 #endif
 	case FREE:

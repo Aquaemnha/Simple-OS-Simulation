@@ -1,0 +1,60 @@
+DMA verification - 2026-11-22 (Asia/Bangkok)
+Branch: feature/dma-coprocessor
+Toolchain: w64devkit 2.11.0, GCC/G++ 16.2.0; Verilator runtime 5.020
+Build: C11 / C++17; supplied generated model unchanged.
+
+Fresh build: make SHELL=sh OBJ=obj/review VERILATOR_ROOT=<5.020> os dma dma-tests dma-cpu-tests -j4
+Exit: 0
+DMA submit: PID 41 status -22
+PASS: descriptor boundaries, endianness, unaligned and final RAM word
+PASS: CPU MEMPHY and DMA callbacks share RAM, buffer reservation and lifetime
+PASS: four submitters, retained completion, repeated requests, large copy, drain and restart
+All DMA checks passed; CPU loop iterations=3304
+PASS: real CPU -> libmem -> PID syscall -> test MM mapping -> RTL -> RAM
+CALC instructions=65536, independent RAM checksum=8355840
+
+DMA submit status -22 above is the intentional >32-bit length rejection.
+CPU integration uses a test MM mapping, not the unfinished MM64 implementation.
+
+Command: dma_testbench.exe
+submit: pid=1 bus=0x1000 -> 0x2000 bytes=512
+interrupt: pid=1 status=0 bytes=512 callbacks=1
+CPU work before completion: 1387 batches, checksum=291336576
+Full data and unchanged source: PASS
+Exit: 0
+
+Command: dma_testbench.exe 1 8193 4
+submit: pid=1 bus=0x1 -> 0x2001 bytes=4
+interrupt: pid=1 status=0 bytes=4 callbacks=1
+CPU work before completion: 98 batches, checksum=4415488
+Full data and unchanged source: PASS
+Exit: 0
+
+Command: dma_testbench.exe 0 1048572 4
+submit: pid=1 bus=0x0 -> 0xffffc bytes=4
+interrupt: pid=1 status=0 bytes=4 callbacks=1
+CPU work before completion: 116 batches, checksum=5493760
+Full data and unchanged source: PASS
+Exit: 0
+
+Command: python -m unittest discover -s tests -p test_dma_cli.py -v
+
+test_complete_data (test_dma_cli.DmaCliTests.test_complete_data)
+Short, unaligned and last-word copies must use the real callback. ... ok
+test_invalid_input (test_dma_cli.DmaCliTests.test_invalid_input)
+Reject overflow, overlap, invalid size and malformed CLI input. ... ok
+test_trace_and_failed_open (test_dma_cli.DmaCliTests.test_trace_and_failed_open)
+A trace-open failure must return an error and join the worker. ... ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.107s
+
+OK
+Exit: 0
+
+Trace: default 512-byte copy; ch_done rising edges=1; max ch_bytes_transferred=512.
+irq pin disabled in supplied model; completion is the provided ch_done DPI callback.
+
+Full OS runtime: os os_1_mlq_paging_small_4K did not finish within 3 seconds.
+Not an end-to-end OS pass: supplied scheduler and MM64 TODOs remain.
+CPU work counts depend on host scheduling and are not performance benchmarks.

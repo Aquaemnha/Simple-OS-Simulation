@@ -5,5 +5,8 @@
 /dma_testbench.exe
 /dma_tests
 /dma_tests.exe
+/dma_cpu_tests
+/dma_cpu_tests.exe
+/tests/__pycache__/
 *.vcd
 /src/syscalltbl.lst
