@@ -1,0 +1,9 @@
+/obj/
+/os
+/os.exe
+/dma_testbench
+/dma_testbench.exe
+/dma_tests
+/dma_tests.exe
+*.vcd
+/src/syscalltbl.lst
