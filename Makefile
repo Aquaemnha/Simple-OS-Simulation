@@ -43,7 +43,7 @@ endif
 export VERILATOR_ROOT
 
 MAKE = $(CC) $(INC)
-CXX_MAKE = $(CXX) -iquote include -I$(VERILATOR_ROOT)/include -I$(VERILATOR_ROOT)/include/vltstd
+CXX_MAKE = $(CXX) -DVL_TIME_CONTEXT -iquote include -I$(VERILATOR_ROOT)/include -I$(VERILATOR_ROOT)/include/vltstd
 
 # Object files needed by modules
 MEM_OBJ = $(addprefix $(OBJ)/, paging.o mem.o cpu.o loader.o)
@@ -66,9 +66,9 @@ VDMA_USER_CLASSES = dpi_rtl sysbus dma_c_testbench
 VDMA_USER_OBJ = $(addprefix $(OBJ)/, $(addsuffix .o, $(VDMA_USER_CLASSES)))
 
 # For OS target: dma_c_testbench compiled with DMA_MAIN=0 (default)
-VDMA_USER_OBJ_OS = $(OBJ)/dpi_rtl.o $(OBJ)/sysbus.o $(OBJ)/dma_c_testbench.o
+VDMA_USER_OBJ_OS = $(OBJ)/dpi_rtl.o $(OBJ)/sysbus.o $(OBJ)/dma.o
 # For DMA target: dma_c_testbench compiled with DMA_MAIN=1
-VDMA_USER_OBJ_DMA = $(OBJ)/dpi_rtl.o $(OBJ)/sysbus.o $(OBJ)/dma_c_testbench_dma.o
+VDMA_USER_OBJ_DMA = $(OBJ)/dpi_rtl.o $(OBJ)/sysbus.o $(OBJ)/dma.o $(OBJ)/dma_c_testbench_dma.o
 
 VDMA_OBJ_OS = $(VDMA_OBJ_FAST) $(VDMA_OBJ_SLOW) $(VDMA_USER_OBJ_OS)
 VDMA_OBJ_DMA = $(VDMA_OBJ_FAST) $(VDMA_OBJ_SLOW) $(VDMA_USER_OBJ_DMA)
@@ -91,8 +91,16 @@ sched: $(SCHED_OBJ)
 
 # Compile DMA testbench with C 
 # define DMA_MAIN=1 in src/dma_c_testbench.cpp to enable main()
-dma: $(OBJ) $(VDMA_OBJ_FAST) $(VDMA_OBJ_SLOW) $(OBJ)/dpi_rtl.o $(OBJ)/sysbus.o $(OBJ)/dma_c_testbench_dma.o
-	$(CXX) $(LFLAGS) $(VDMA_OBJ_FAST) $(VDMA_OBJ_SLOW) $(OBJ)/dpi_rtl.o $(OBJ)/sysbus.o $(OBJ)/dma_c_testbench_dma.o -o dma_testbench $(LIB)
+dma: $(OBJ) $(VDMA_OBJ_DMA)
+	$(CXX) $(LFLAGS) $(VDMA_OBJ_DMA) -o dma_testbench $(LIB)
+
+.PHONY: dma-tests
+dma-tests: $(OBJ)/dma_tests.o $(OBJ)/mm-memphy.o $(VDMA_OBJ_OS)
+	$(CXX) $(LFLAGS) $^ -o dma_tests $(LIB)
+	./dma_tests
+
+$(OBJ)/dma_tests.o: tests/dma_tests.c $(HEADER) | $(OBJ)
+	$(MAKE) $(CFLAGS) $< -o $@
 
 # Compile dma_c_testbench with DMA_MAIN=1 for standalone testbench
 $(OBJ)/dma_c_testbench_dma.o: src/dma_c_testbench.cpp ${HEADER} $(OBJ)

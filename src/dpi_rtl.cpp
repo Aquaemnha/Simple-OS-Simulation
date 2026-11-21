@@ -1,160 +1,153 @@
 /*
  * Copyright (C) 2026 pdnguyen of HCMC University of Technology VNU-HCM
- *
- * demacOprx release
- * Source Code License Grant: The authors hereby grant to Licensee
- * personal permission to use and modify the Licensed Source Code
- * for the sole purpose of studying while attending the course CO2018.
- *
- * DPI RTL C++ interface to  DMA RTL
+ * demacOprx release. Educational use for course CO2018; see LICENSE.
+ * This wrapper is used only by the DMA worker thread (context-based time).
  */
 
 #include <verilated.h>
 #include <verilated_vcd_c.h>
 #include "Vdma_top.h"
-#include "sysbus.h"
 #include "dpi_rtl.h"
-#include <cstdio>
-#include <cstdint>
-#include <cstring>
+#include <cerrno>
+#include <cstdlib>
+#include <new>
 
-// DMA RTL simulation structures
-static Vdma_top* top = nullptr;
-static VerilatedContext* context = nullptr;
-static VerilatedVcdC* tracer = nullptr;
+static Vdma_top *top;
+static VerilatedContext *context;
+static VerilatedVcdC *tracer;
+static uint32_t last_bytes;
 
-static bool is_tracing = false;
-static uint64_t sim_time = 0;
-
-/**
- * rtl_dma_init_simulation - Initialize the RTL simulation for DMA
- */
-extern "C" int rtl_dma_init_simulation(void) {
-    if (top) return 0;
-    if (context) return 0;
-    
-    context = new VerilatedContext;
-    const char* args[] = {};
-    context->commandArgs(0, args);
-    top = new Vdma_top(context, "dma_top");
-    
-    tracer = new VerilatedVcdC;
-    context->traceEverOn(true);
-    top->trace(tracer, 99);
-    tracer->open("rtl_trace.vcd");
-    is_tracing = true;
-    sim_time = 0;
-    
-    printf("Initialized dma_rtl simulation\n");
-    return 0;
+static void
+tick ()
+{
+  top->clk ^= 1;
+  top->eval ();
+  if (tracer != nullptr)
+    tracer->dump (context->time ());
+  context->timeInc (1);
 }
 
-/**
- * rtl_dma_cleanup_simulation - Cleanup the RTL simulation for DMA
- */
-extern "C" void rtl_dma_cleanup_simulation(void) {
-    if (tracer) {
-        tracer->close();
-        delete tracer;
-        tracer = nullptr;
+extern "C" void
+rtl_dma_cleanup_simulation (void)
+{
+  if (top != nullptr)
+    top->final ();
+  if (tracer != nullptr)
+    {
+      tracer->close ();
+      delete tracer;
+      tracer = nullptr;
     }
-    if (top) {
-        delete top;
-        top = nullptr;
-    }
-    if (context) {
-        delete context;
-        context = nullptr;
-    }
-    is_tracing = false;
-    sim_time = 0;
-    printf("Clean up dma_rtl simulation\n");
+  delete top;
+  top = nullptr;
+  delete context;
+  context = nullptr;
 }
 
-/**
- * rtl_dma_copy - Execute DMA copy using Verilator RTL
- * source: source memory offset
- * destination: destination memory offset
- * length: number of bytes to copy
- */
-extern "C" int dpi_rtl_dma_copy(uint64_t source, uint64_t destination, uint64_t length) {
-    if (!top) {
-        printf("Cannot perform DMA copy: RTL simulation not initialized\n");
-        return -1;
-    }
-    
-    //printf("RTL DMA Copy: src=%llu, dst=%llu, len=%llu\n",
-    //       (unsigned long long) source,
-    //       (unsigned long long) destination,
-    //       (unsigned long long) length);
-    
-    // Reset
-    top->clk = 0;
-    top->rst_n = 0;
-    top->eval();
-    top->clk ^= 1;
-    top->eval();
-    
-    top->rst_n = 1;
-    top->clk ^= 1;
-    top->eval();
-    top->clk ^= 1;
-    top->eval();
-    
-    // Set descriptor
-    top->desc_valid = 1;
-    top->desc_data_0 = source;
-    top->desc_data_1 = destination;
-    top->desc_data_2 = length;
-    top->desc_data_3 = 0;
-    
-    top->ch_enable = 1;
-    top->ch_pause = 0;
-    
-    // Run simulation
-    int cycle = 0;
-    int max_cycles = 100000;
-    
-    while (cycle < max_cycles && !top->ch_done) {
-        top->clk ^= 1;
-        top->eval();
-        
-    //    if (cycle % 10 == 0) {
-    //        printf("  Cycle %d: clk=%d, state=%d, ch_done=%d\n",
-    //               cycle, (int)top->clk, (int)top->state, (int)top->ch_done);
-    //    }
-        
-        if (is_tracing) {
-            tracer->dump(sim_time);
-            sim_time += 10;
+extern "C" int
+rtl_dma_init_simulation (void)
+{
+  const char *trace_path = std::getenv ("DMA_TRACE");
+
+  if (top != nullptr)
+    return -EBUSY;
+  try
+    {
+      context = new VerilatedContext;
+      context->threads (1);
+      context->traceEverOn (trace_path != nullptr && trace_path[0] != '\0');
+      top = new Vdma_top (context, "dma_top");
+      if (trace_path != nullptr && trace_path[0] != '\0')
+        {
+          tracer = new VerilatedVcdC;
+          top->trace (tracer, 99);
+          tracer->open (trace_path);
+          if (!tracer->isOpen ())
+            {
+              rtl_dma_cleanup_simulation ();
+              return -EIO;
+            }
         }
-        
-        cycle++;
     }
-
-    // ch_done is high now. Keep clocking (2 full cycles) with ch_enable still asserted
-    // dma_done_callback() on the next rising edge.
-    top->clk ^= 1;
-    top->eval();
-    top->clk ^= 1;
-    top->eval();
-   
-    top->desc_valid = 0;
-    top->ch_enable = 0;
-    top->ch_pause = 0;
-    
-    //printf("RTL DMA Copy: Completed in %d cycles, ch_done=%d\n", cycle, (int)top->ch_done);
-
-    return top->ch_done ? 0 : -1;
+  catch (const std::bad_alloc &)
+    {
+      rtl_dma_cleanup_simulation ();
+      return -ENOMEM;
+    }
+  last_bytes = 0;
+  return 0;
 }
 
+extern "C" int
+dpi_rtl_dma_copy (uint64_t source, uint64_t destination, uint64_t length)
+{
+  int status;
+  uint64_t half_cycles = 0;
+  uint64_t limit;
 
-/**
- * dpi_rtl_dma_is_available - Check if RTL DMA is available
- */
-extern "C" int dpi_rtl_dma_is_available(void) {
-    return top != nullptr;
+  last_bytes = 0;
+  if (top == nullptr)
+    return -ENODEV;
+  if (length == 0 || length > UINT32_MAX || length % 4 != 0)
+    return -EINVAL;
+
+  top->clk = 0;
+  top->rst_n = 0;
+  top->desc_valid = 0;
+  top->ch_enable = 0;
+  top->ch_pause = 0;
+  top->eval ();
+  tick ();
+  tick ();
+  top->rst_n = 1;
+  top->desc_data_0 = source;
+  top->desc_data_1 = destination;
+  top->desc_data_2 = length;
+  top->desc_data_3 = 0;
+  top->desc_valid = 1;
+  top->ch_enable = 1;
+
+  /* The model needs read/write handshakes for every word. Scale the timeout
+     with the transfer rather than truncating large copies at 100000 ticks. */
+  limit = 64 + 32 * (length / 4);
+  while (!top->ch_done && !top->ch_error && !context->gotFinish ()
+         && half_cycles < limit)
+    {
+      tick ();
+      half_cycles++;
+    }
+  status = top->ch_done ? 0 : -ETIMEDOUT;
+  if (top->ch_error || context->gotFinish ())
+    status = -EIO;
+  if (status == 0)
+    {
+      /* The supplied ch_done edge detector calls DPI on the next rising edge.
+         Its irq pin is disabled by intr_en=0 in the generated model. */
+      tick ();
+      tick ();
+    }
+  last_bytes = top->ch_bytes_transferred;
+  if (sysbus_dma_error () != 0)
+    status = sysbus_dma_error ();
+
+  /* Quiesce the bus before returning, including the timeout/error path. */
+  top->ch_enable = 0;
+  top->desc_valid = 0;
+  top->rst_n = 0;
+  top->eval ();
+  tick ();
+  tick ();
+  return status;
 }
 
+extern "C" uint32_t
+dpi_rtl_dma_bytes_transferred (void)
+{
+  return last_bytes;
+}
 
-
+extern "C" int
+dpi_rtl_dma_is_available (void)
+{
+  return top != nullptr;
+}

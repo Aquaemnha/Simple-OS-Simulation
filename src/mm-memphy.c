@@ -16,6 +16,8 @@
 
 #include "mm.h"
 #include "mm64.h"
+#include "sysbus.h"
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -68,11 +70,17 @@ int MEMPHY_seq_read(struct memphy_struct *mp, addr_t addr, BYTE *value)
  */
 int MEMPHY_read(struct memphy_struct *mp, addr_t addr, BYTE *value)
 {
-   if (mp == NULL)
-      return -1;
+   if (mp == NULL || value == NULL)
+      return -EFAULT;
 
    if (mp->rdmflg)
-      *value = mp->storage[addr];
+   {
+      unsigned char byte;
+      int status = sysbus_cpu_read(mp, addr, &byte);
+      if (status == 0)
+         *value = (BYTE)byte;
+      return status;
+   }
    else /* Sequential access device */
       return MEMPHY_seq_read(mp, addr, value);
 
@@ -112,7 +120,7 @@ int MEMPHY_write(struct memphy_struct *mp, addr_t addr, BYTE data)
       return -1;
 
    if (mp->rdmflg)
-      mp->storage[addr] = data;
+      return sysbus_cpu_write(mp, addr, (unsigned char)data);
    else /* Sequential access device */
       return MEMPHY_seq_write(mp, addr, data);
 
@@ -185,6 +193,15 @@ int MEMPHY_dump(struct memphy_struct *mp)
 
 int MEMPHY_put_freefp(struct memphy_struct *mp, addr_t fpn)
 {
+#ifdef MM64
+   const uint64_t pagesz = PAGING64_PAGESZ;
+#else
+   const uint64_t pagesz = PAGING_PAGESZ;
+#endif
+   if (fpn > UINT64_MAX / pagesz
+       || sysbus_range_pinned(mp, fpn * pagesz, pagesz))
+      return -EBUSY;
+
    struct framephy_struct *fp = mp->free_fp_list;
    struct framephy_struct *newnode = malloc(sizeof(struct framephy_struct));
 

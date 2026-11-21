@@ -15,16 +15,26 @@ Set `VERILATOR_ROOT=/path/to/verilator` if the runtime is outside
 `/usr/share/verilator`. It must contain `include/verilated.h` and
 `include/verilated_config.h`.
 
-This branch is also checked with MinGW-w64 GCC/G++ 14.2.0 (POSIX threads)
-and Git Bash on Windows:
+On Windows, use the portable w64devkit 2.11.0 toolchain (GCC/G++ 16.2.0,
+POSIX threads). Keep its `bin` first on the shell's PATH:
 
 ```sh
-mingw32-make SHELL=sh VERILATOR_ROOT=D:/path/to/verilator-v5.020 dma
+make SHELL=sh VERILATOR_ROOT=D:/path/to/verilator-v5.020 dma dma-tests
 ./dma_testbench.exe
 ```
 
-The first baseline run copied 512 bytes from bus offset `0x1000` to `0x2000`
-and reached the supplied model's completion callback. That baseline driver
-prints only the first eight bytes; later tests must compare the full transfer.
+The standalone driver compares every transferred byte and checks that the
+source is unchanged. `dma-tests` checks descriptor errors, shared CPU/DMA
+RAM, concurrent submission, retained completion, shutdown and restart.
+
+The older installed MinGW GCC 14.2 toolchain passed a single copy but crashed
+when destroying C++ thread-local objects at thread exit. A separate program
+containing only `pthread_create/join` and a `thread_local std::queue<int>`
+reproduced the failure. That program and the DMA lifecycle tests passed with
+w64devkit. No generated model or Verilator runtime behavior was patched.
+
+When switching compilers, use a separate object directory, for example
+`OBJ=obj/w64devkit`, rather than mixing objects from different toolchains.
+
 The removed testbench includes were unused and pulled Windows' `BYTE` type
 into the course header's `BYTE` typedef.
