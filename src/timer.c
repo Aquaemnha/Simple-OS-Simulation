@@ -1,136 +1,132 @@
-
 #include "timer.h"
+#include <errno.h>
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 
-static pthread_t _timer;
-
-struct timer_id_container_t {
-	struct timer_id_t id;
-	struct timer_id_container_t * next;
+struct timer_event
+{
+  struct timer_id_t id;
+  struct timer_event *next;
 };
 
-static struct timer_id_container_t * dev_list = NULL;
+/* One mutex protects slot generation and all device predicates. A device
+   cannot lose a wakeup between declaring itself done and awaiting the tick. */
+static pthread_mutex_t timer_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t changed = PTHREAD_COND_INITIALIZER;
+static struct timer_event *events;
+static pthread_t timer_thread;
+static uint64_t ticks;
+static int started;
 
-static uint64_t _time;
+static void *
+timer_routine (void *unused)
+{
+  (void) unused;
+  pthread_mutex_lock (&timer_lock);
+  for (;;)
+    {
+      struct timer_event *event;
+      int waiting = 0, active = 0;
 
-static int timer_started = 0;
-static int timer_stop = 0;
-
-
-static void * timer_routine(void * args) {
-	while (!timer_stop) {
-		printf("Time slot %3lu\n", current_time());
-		int fsh = 0;
-		int event = 0;
-		/* Wait for all devices have done the job in current
-		 * time slot */
-		struct timer_id_container_t * temp;
-		for (temp = dev_list; temp != NULL; temp = temp->next) {
-			pthread_mutex_lock(&temp->id.event_lock);
-			while (!temp->id.done && !temp->id.fsh) {
-				pthread_cond_wait(
-					&temp->id.event_cond,
-					&temp->id.event_lock
-				);
-			}
-			if (temp->id.fsh) {
-				fsh++;
-			}
-			event++;
-			pthread_mutex_unlock(&temp->id.event_lock);
-		}
-
-		/* Increase the time slot */
-		_time++;
-		
-		/* Let devices continue their job */
-		for (temp = dev_list; temp != NULL; temp = temp->next) {
-			pthread_mutex_lock(&temp->id.timer_lock);
-			temp->id.done = 0;
-			pthread_cond_signal(&temp->id.timer_cond);
-			pthread_mutex_unlock(&temp->id.timer_lock);
-		}
-		if (fsh == event) {
-			break;
-		}
-	}
-	pthread_exit(args);
+      for (event = events; event != NULL; event = event->next)
+        if (!event->id.fsh)
+          {
+            active++;
+            if (!event->id.done)
+              waiting++;
+          }
+      if (active == 0)
+        break;
+      if (waiting != 0)
+        {
+          pthread_cond_wait (&changed, &timer_lock);
+          continue;
+        }
+      ticks++;
+      printf ("Time slot %3" PRIu64 "\n", ticks);
+      for (event = events; event != NULL; event = event->next)
+        event->id.done = 0;
+      pthread_cond_broadcast (&changed);
+    }
+  pthread_mutex_unlock (&timer_lock);
+  return NULL;
 }
 
-void next_slot(struct timer_id_t * timer_id) {
-	/* Tell to timer that we have done our job in current slot */
-	pthread_mutex_lock(&timer_id->event_lock);
-	timer_id->done = 1;
-	pthread_cond_signal(&timer_id->event_cond);
-	pthread_mutex_unlock(&timer_id->event_lock);
+void
+next_slot (struct timer_id_t *id)
+{
+  uint64_t previous;
 
-	/* Wait for going to next slot */
-	pthread_mutex_lock(&timer_id->timer_lock);
-	while (timer_id->done) {
-		pthread_cond_wait(
-			&timer_id->timer_cond,
-			&timer_id->timer_lock
-		);
-	}
-	pthread_mutex_unlock(&timer_id->timer_lock);
+  pthread_mutex_lock (&timer_lock);
+  previous = ticks;
+  id->done = 1;
+  pthread_cond_broadcast (&changed);
+  while (ticks == previous)
+    pthread_cond_wait (&changed, &timer_lock);
+  pthread_mutex_unlock (&timer_lock);
 }
 
-uint64_t current_time() {
-	return _time;
+uint64_t
+current_time (void)
+{
+  uint64_t value;
+
+  pthread_mutex_lock (&timer_lock);
+  value = ticks;
+  pthread_mutex_unlock (&timer_lock);
+  return value;
 }
 
-void start_timer() {
-	timer_started = 1;
-	pthread_create(&_timer, NULL, timer_routine, NULL);
+int
+start_timer (void)
+{
+  int status;
+
+  if (started || events == NULL)
+    return -EINVAL;
+  ticks = 0;
+  status = pthread_create (&timer_thread, NULL, timer_routine, NULL);
+  if (status == 0)
+    started = 1;
+  return -status;
 }
 
-void detach_event(struct timer_id_t * event) {
-	pthread_mutex_lock(&event->event_lock);
-	event->fsh = 1;
-	pthread_cond_signal(&event->event_cond);
-	pthread_mutex_unlock(&event->event_lock);
+void
+detach_event (struct timer_id_t *id)
+{
+  pthread_mutex_lock (&timer_lock);
+  id->fsh = 1;
+  pthread_cond_broadcast (&changed);
+  pthread_mutex_unlock (&timer_lock);
 }
 
-struct timer_id_t * attach_event() {
-	if (timer_started) {
-		return NULL;
-	}else{
-		struct timer_id_container_t * container =
-			(struct timer_id_container_t*)malloc(
-				sizeof(struct timer_id_container_t)		
-			);
-		container->id.done = 0;
-		container->id.fsh = 0;
-		pthread_cond_init(&container->id.event_cond, NULL);
-		pthread_mutex_init(&container->id.event_lock, NULL);
-		pthread_cond_init(&container->id.timer_cond, NULL);
-		pthread_mutex_init(&container->id.timer_lock, NULL);
-		if (dev_list == NULL) {
-			dev_list = container;
-			dev_list->next = NULL;
-		}else{
-			container->next = dev_list;
-			dev_list = container;
-		}
-		return &(container->id);
-	}
+struct timer_id_t *
+attach_event (void)
+{
+  struct timer_event *event;
+
+  if (started)
+    return NULL;
+  event = calloc (1, sizeof *event);
+  if (event == NULL)
+    return NULL;
+  event->next = events;
+  events = event;
+  return &event->id;
 }
 
-void stop_timer() {
-	timer_stop = 1;
-	pthread_join(_timer, NULL);
-	while (dev_list != NULL) {
-		struct timer_id_container_t * temp = dev_list;
-		dev_list = dev_list->next;
-		pthread_cond_destroy(&temp->id.event_cond);
-		pthread_mutex_destroy(&temp->id.event_lock);
-		pthread_cond_destroy(&temp->id.timer_cond);
-		pthread_mutex_destroy(&temp->id.timer_lock);
-		free(temp);
-	}
+void
+stop_timer (void)
+{
+  struct timer_event *event;
+
+  if (started)
+    pthread_join (timer_thread, NULL);
+  started = 0;
+  while ((event = events) != NULL)
+    {
+      events = event->next;
+      free (event);
+    }
 }
-
-
-
-

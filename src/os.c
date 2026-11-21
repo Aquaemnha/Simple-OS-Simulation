@@ -1,349 +1,406 @@
 /*
  * Copyright (C) 2026 pdnguyen of HCMC University of Technology VNU-HCM
- *
- * demacOprx release
- * Source Code License Grant: The authors hereby grant to Licensee
- * personal permission to use and modify the Licensed Source Code
- * for the sole purpose of studying while attending the course CO2018.
- *
- * System OS module
+ * demacOprx release. Educational use for course CO2018; see LICENSE.
  */
+
 #include "cpu.h"
-#include "timer.h"
-#include "sched.h"
-#include "loader.h"
-#include "mm.h"
-#ifdef MM64
-#include "mm64.h"
-#endif
-
-#include <pthread.h>
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
-#include <stdint.h>
-#include <stdbool.h>
-
-#include "sysbus.h"
 #include "dma.h"
+#include "libmem.h"
+#include "loader.h"
+#include "mm64.h"
+#include "queue.h"
+#include "sched.h"
+#include "sysbus.h"
+#include "timer.h"
+#include <errno.h>
+#include <limits.h>
+#include <sched.h>
+#include <stdatomic.h>
+#include <stdlib.h>
+#include <string.h>
 
-static int time_slot;
-static int num_cpus;
-static int done = 0;
+static unsigned int time_slice, cpu_count, process_count;
+static addr_t ram_size, swap_sizes[PAGING_MAX_MMSWP];
+static atomic_int loader_done;
+static atomic_int failed;
 static struct krnl_t os;
 
-#ifdef MM_PAGING
-static unsigned long memramsz;
-static unsigned long memswpsz[PAGING_MAX_MMSWP];
-
-struct mmpaging_ld_args {
-	/* A dispatched argument struct to compact many-fields passing to loader */
-	int vmemsz;
-	struct memphy_struct *mram;
-	struct memphy_struct **mswp;
-	struct memphy_struct *active_mswp;
-	int active_mswp_id;
-	struct timer_id_t  *timer_id;
+struct launch
+{
+  struct pcb_t *process;
+  uint64_t time;
 };
-#endif
+static struct launch launches[MAX_QUEUE_SIZE];
 
-static struct ld_args{
-	char ** path;
-	unsigned long * start_time;
-#ifdef MLQ_SCHED
-	unsigned long * prio;
-#endif
-} ld_processes;
-int num_processes;
+static int
+read_number (FILE *file, uint64_t *value)
+{
+  char token[100], *end;
 
-struct cpu_args {
-	struct timer_id_t * timer_id;
-	int id;
+  if (fscanf (file, "%99s", token) != 1 || token[0] < '0' || token[0] > '9')
+    return -EINVAL;
+  errno = 0;
+  *value = strtoull (token, &end, 10);
+  return errno != 0 || *end != '\0' ? -EINVAL : 0;
+}
+
+struct cpu_args
+{
+  struct timer_id_t *timer;
+  unsigned int id;
+  int started;
 };
 
-/* Called between CPU instructions, outside the RTL worker's callback. */
+/* The retained DPI completion is handled at an instruction boundary. */
 static void
 handle_dma_interrupt (void)
 {
   struct dma_result result;
 
   if (dma_take_completion (&result) == 1)
-    printf ("\tDMA interrupt: PID %u status %d bytes %u callbacks %u\n",
-            result.pid, result.status, result.bytes_transferred,
-            result.interrupts);
-}
-
-static void * cpu_routine(void * args) {
-	struct timer_id_t * timer_id = ((struct cpu_args*)args)->timer_id;
-	int id = ((struct cpu_args*)args)->id;
-	/* Check for new process in ready queue */
-	int time_left = 0;
-	struct pcb_t * proc = NULL;
-	while (1) {
-		handle_dma_interrupt ();
-		/* Check the status of current process */
-		if (proc == NULL) {
-			/* No process is running, the we load new process from
-		 	* ready queue */
-			proc = get_proc();
-			if (proc == NULL) {
-                           next_slot(timer_id);
-                           continue; /* First load failed. skip dummy load */
-                        }
-		}else if (proc->pc == proc->code->size) {
-			/* Keep DMA buffers alive; let other processes use this CPU. */
-			if (dma_pid_busy (proc->pid))
-				put_proc (proc);
-			else {
-				printf("\tCPU %d: Processed %2d has finished\n",
-					id, proc->pid);
-				free(proc);
-			}
-			proc = get_proc();
-			time_left = 0;
-		}else if (time_left == 0) {
-			/* The process has done its job in current time slot */
-			printf("\tCPU %d: Put process %2d to run queue\n",
-				id, proc->pid);
-			put_proc(proc);
-			proc = get_proc();
-		}
-		
-		/* Recheck process status after loading new process */
-		if (proc == NULL && done) {
-			/* No process to run, exit */
-			printf("\tCPU %d stopped\n", id);
-			break;
-		}else if (proc == NULL) {
-			/* There may be new processes to run in
-			 * next time slots, just skip current slot */
-			next_slot(timer_id);
-			continue;
-		}else if (time_left == 0) {
-			printf("\tCPU %d: Dispatched process %2d\n",
-				id, proc->pid);
-			time_left = time_slot;
-		}
-		
-		/* Run current process */
-		run(proc);
-		time_left--;
-		next_slot(timer_id);
-	}
-	detach_event(timer_id);
-	pthread_exit(NULL);
-}
-
-
-static void * ld_routine(void * args) {
-#ifdef MM_PAGING
-	struct memphy_struct* mram = ((struct mmpaging_ld_args *)args)->mram;
-	struct memphy_struct** mswp = ((struct mmpaging_ld_args *)args)->mswp;
-	struct memphy_struct* active_mswp = ((struct mmpaging_ld_args *)args)->active_mswp;
-	struct timer_id_t * timer_id = ((struct mmpaging_ld_args *)args)->timer_id;
-#else
-	struct timer_id_t * timer_id = (struct timer_id_t*)args;
-#endif
-	int i = 0;
-  /* TODO init kernel page table directory */
-#ifdef MM64
-	os.krnl_pgd = (addr_t*)malloc(PAGING64_MAX_PGN * sizeof(addr_t));
-	os.krnl_p4d = NULL;
-	os.krnl_pud = NULL;
-	os.krnl_pmd = NULL;
-	os.krnl_pt = NULL;
-#else
-	os.krnl_pgd = (uint32_t*)malloc(PAGING_MAX_PGN * sizeof(uint32_t));
-#endif
-	i=0;
-	printf("ld_routine\n");
-	os.mram = mram;
-	os.mswp = mswp;
-	os.active_mswp = active_mswp;
-	os.mm = (struct mm_struct*)malloc(sizeof(struct mm_struct));
-	init_mm(os.mm, NULL);
-	while (i < num_processes) {
-		struct pcb_t * proc = load(ld_processes.path[i]);
-		proc->krnl = &os;
-
-#ifdef MLQ_SCHED
-	proc->prio = ld_processes.prio[i];
-#endif
-	while (current_time() < ld_processes.start_time[i]) {
-		next_slot(timer_id);
-	}
-#ifdef MM_PAGING
-	proc->mm = (struct mm_struct*)malloc(sizeof(struct mm_struct));
-	init_mm(proc->mm, proc);
-#endif
-		printf("\tLoaded a process at %s, PID: %d PRIO: %ld\n",
-			ld_processes.path[i], proc->pid, ld_processes.prio[i]);
-		add_proc(proc);
-		free(ld_processes.path[i]);
-		i++;
-		next_slot(timer_id);
-	}
-	free(ld_processes.path);
-	free(ld_processes.start_time);
-	done = 1;
-	detach_event(timer_id);
-	pthread_exit(NULL);
-}
-
-static void read_config(const char * path) {
-	FILE * file;
-	if ((file = fopen(path, "r")) == NULL) {
-		printf("Cannot find configure file at %s\n", path);
-		exit(1);
-	}
-	fscanf(file, "%d %d %d\n", &time_slot, &num_cpus, &num_processes);
-	ld_processes.path = (char**)malloc(sizeof(char*) * num_processes);
-	ld_processes.start_time = (unsigned long*)
-		malloc(sizeof(unsigned long) * num_processes);
-#ifdef MM_PAGING
-	int sit;
-#ifdef MM_FIXED_MEMSZ
-	/* We provide here a back compatible with legacy OS simulatiom config file
-         * In which, it have no addition config line for Mema, keep only one line
-	 * for legacy info 
-         *  [time slice] [N = Number of CPU] [M = Number of Processes to be run]
-         */
-        memramsz  =  0x100000000;
-        memswpsz[0] = 0x1000000;
-	for(sit = 1; sit < PAGING_MAX_MMSWP; sit++)
-		memswpsz[sit] = 0;
-#else
-	/* Read input config of memory size: MEMRAM and upto 4 MEMSWP (mem swap)
-	 * Format: (size=0 result non-used memswap, must have RAM and at least 1 SWAP)
-	 *        MEM_RAM_SZ MEM_SWP0_SZ MEM_SWP1_SZ MEM_SWP2_SZ MEM_SWP3_SZ
-	*/
-	fscanf(file, FORMAT_ARG "\n", &memramsz);
-	for(sit = 0; sit < PAGING_MAX_MMSWP; sit++)
-		fscanf(file, FORMAT_ARG, &(memswpsz[sit])); 
-
-       fscanf(file, "\n"); /* Final character */
-#endif
-#endif
-
-#ifdef MLQ_SCHED
-	ld_processes.prio = (unsigned long*)
-		malloc(sizeof(unsigned long) * num_processes);
-#endif
-	int i;
-	for (i = 0; i < num_processes; i++) {
-		ld_processes.path[i] = (char*)malloc(sizeof(char) * 100);
-		ld_processes.path[i][0] = '\0';
-		strcat(ld_processes.path[i], "input/proc/");
-		char proc[100];
-#ifdef MLQ_SCHED
-		fscanf(file, "%lu %s %lu\n", &ld_processes.start_time[i], proc, &ld_processes.prio[i]);
-#else
-		fscanf(file, "%lu %s\n", &ld_processes.start_time[i], proc);
-#endif
-		strcat(ld_processes.path[i], proc);
-	}
-}
-
-int main(int argc, char * argv[]) {
-	/* Read config */
-	if (argc != 2) {
-		printf("Usage: os [path to configure file]\n");
-		return 1;
-	}
-	char path[100];
-	path[0] = '\0';
-	strcat(path, "input/");
-	strcat(path, argv[1]);
-	read_config(path);
-
-	pthread_t * cpu = (pthread_t*)malloc(num_cpus * sizeof(pthread_t));
-	struct cpu_args * args =
-		(struct cpu_args*)malloc(sizeof(struct cpu_args) * num_cpus);
-	pthread_t ld;
-	
-	int i;
-
-#ifdef MM_PAGING
-	/* Init all MEMPHY include 1 MEMRAM and n of MEMSWP */
-	int rdmflag = 1; /* By default memphy is RANDOM ACCESS MEMORY */
-
-	struct memphy_struct mram;
-	struct memphy_struct mswp[PAGING_MAX_MMSWP];
-
-	/* Create MEM RAM */
-	init_memphy(&mram, memramsz, rdmflag);
-
-  /* Bind the same physical RAM that CPU MEMPHY accesses use. Complete RTL
-     initialization before any CPU can submit a descriptor. */
-  int dma_status = sysbus_bind_ram (&mram);
-  if (dma_status == 0)
-    dma_status = dma_start ();
-  if (dma_status != 0)
     {
-      fprintf (stderr, "Cannot start DMA: %d\n", dma_status);
-      memory_bank_cleanup ();
-      free (cpu);
-      free (args);
+      printf ("DMA interrupt: PID %u status %d bytes %u callbacks %u "
+              "CPU instructions during DMA=%" PRIu64 "\n",
+              result.pid, result.status, result.bytes_transferred,
+              result.interrupts, result.cpu_instructions);
+      if (result.status != 0)
+        atomic_store (&failed, 1);
+    }
+}
+
+static void
+release_process (struct pcb_t *process)
+{
+  int status;
+
+  print_pgtbl (process, 0, 0);
+  status = free_pcb_memph (process);
+  finish_proc (process);
+  if (status != 0)
+    {
+      fprintf (stderr, "Cannot release PID %u: %d\n", process->pid, status);
+      atomic_store (&failed, 1);
+      return;
+    }
+  free (process->mm);
+  unload (process);
+}
+
+static void
+requeue_process (struct pcb_t *process)
+{
+  int status = put_proc (process);
+
+  if (status != 0)
+    {
+      fprintf (stderr, "Cannot requeue PID %u: %d\n", process->pid, status);
+      finish_proc (process);
+      atomic_store (&failed, 1);
+      /* The PID registry retains ownership for shutdown cleanup. */
+    }
+}
+
+static void *
+cpu_routine (void *argument)
+{
+  struct cpu_args *args = argument;
+  struct pcb_t *process = NULL;
+  unsigned int remaining = 0;
+
+  for (;;)
+    {
+      int status = 0;
+
+      handle_dma_interrupt ();
+      if (process != NULL && process->pc == process->code->size)
+        {
+          if (dma_pid_busy (process->pid))
+            requeue_process (process);
+          else
+            {
+              printf ("CPU %u: Process %u finished\n", args->id, process->pid);
+              release_process (process);
+            }
+          process = NULL;
+        }
+      if (process != NULL && remaining == 0)
+        {
+          requeue_process (process);
+          process = NULL;
+        }
+      if (process == NULL)
+        {
+          process = get_proc ();
+          remaining = time_slice;
+          if (process != NULL)
+            printf ("CPU %u: Dispatched PID %u at slot %" PRIu64 "\n",
+                    args->id, process->pid, current_time ());
+        }
+      if (process == NULL && atomic_load (&loader_done))
+        break;
+      if (process != NULL && process->pc < process->code->size)
+        {
+          status = run (process);
+          if (status != 0 && status != -EBUSY && status != -EAGAIN)
+            {
+              fprintf (stderr, "PID %u instruction %u failed: %d\n",
+                       process->pid, process->pc, status);
+              process->pc = process->code->size;
+              atomic_store (&failed, 1);
+            }
+          remaining--;
+          if (status == -EBUSY || status == -EAGAIN)
+            remaining = 0;
+        }
+      sched_yield ();
+      next_slot (args->timer);
+    }
+  printf ("CPU %u stopped\n", args->id);
+  detach_event (args->timer);
+  return NULL;
+}
+
+static void *
+loader_routine (void *argument)
+{
+  struct timer_id_t *timer = argument;
+
+  for (unsigned int i = 0; i < process_count; i++)
+    {
+      struct pcb_t *process = launches[i].process;
+      int status;
+
+      while (current_time () < launches[i].time)
+        next_slot (timer);
+      process->mm = calloc (1, sizeof *process->mm);
+      pthread_mutex_lock (&mmvm_lock);
+      status = process->mm == NULL ? -ENOMEM : init_mm (process->mm, process);
+      if (status == 0)
+        status = mm_register_process (process);
+      pthread_mutex_unlock (&mmvm_lock);
+      if (status == 0)
+        {
+          printf ("Loaded %s PID %u priority %u\n", process->path,
+                  process->pid, process->prio);
+          status = add_proc (process);
+        }
+      if (status != 0)
+        {
+          fprintf (stderr, "Cannot start PID %u: %d\n", process->pid, status);
+          if (process->mm != NULL && process->mm->pgd != NULL)
+            free_pcb_memph (process);
+          free (process->mm);
+          unload (process);
+          atomic_store (&failed, 1);
+        }
+      launches[i].process = NULL;
+      next_slot (timer);
+    }
+  atomic_store (&loader_done, 1);
+  detach_event (timer);
+  return NULL;
+}
+
+static int
+read_config (const char *name)
+{
+  char path[256], program[100];
+  FILE *file;
+  unsigned int loaded = 0;
+  uint64_t slice, cpus, processes;
+  int status = -EINVAL;
+
+  if (snprintf (path, sizeof path, "input/%s", name) >= (int) sizeof path)
+    return -EINVAL;
+  file = fopen (path, "r");
+  if (file == NULL)
+    return -ENOENT;
+  if (read_number (file, &slice) != 0 || slice == 0 || slice > UINT_MAX
+      || read_number (file, &cpus) != 0 || cpus == 0 || cpus > MAX_QUEUE_SIZE
+      || read_number (file, &processes) != 0 || processes > MAX_QUEUE_SIZE
+      || read_number (file, &ram_size) != 0 || ram_size < PAGING64_PAGESZ
+      || ram_size > (PAGING_PTE_FPN_MASK + 1) * PAGING64_PAGESZ)
+    goto finish;
+  time_slice = (unsigned int) slice;
+  cpu_count = (unsigned int) cpus;
+  process_count = (unsigned int) processes;
+  for (int i = 0; i < PAGING_MAX_MMSWP; i++)
+    if (read_number (file, &swap_sizes[i]) != 0 || swap_sizes[i] > INT_MAX)
+      goto finish;
+  for (; loaded < process_count; loaded++)
+    {
+      struct pcb_t *process;
+      uint64_t priority;
+
+      if (read_number (file, &launches[loaded].time) != 0
+          || fscanf (file, "%99s", program) != 1
+          || read_number (file, &priority) != 0 || priority >= MAX_PRIO
+          || (loaded != 0
+              && launches[loaded].time < launches[loaded - 1].time))
+        goto finish;
+      if (snprintf (path, sizeof path, "input/proc/%s", program)
+          >= (int) sizeof path)
+        goto finish;
+      process = load (path);
+      if (process == NULL)
+        goto finish;
+      process->prio = (uint32_t) priority;
+      process->krnl = &os;
+      launches[loaded].process = process;
+    }
+  if (fscanf (file, " %99s", program) == 1)
+    goto finish;
+  status = 0;
+finish:
+  fclose (file);
+  if (status != 0)
+    {
+      for (unsigned int i = 0; i < loaded; i++)
+        unload (launches[i].process);
+      process_count = 0;
+    }
+  return status;
+}
+
+int
+main (int argc, char **argv)
+{
+  struct memphy_struct ram = { 0 }, swaps[PAGING_MAX_MMSWP] = { 0 };
+  struct memphy_struct *swap_ptrs[PAGING_MAX_MMSWP];
+  struct mm_struct kernel_mm = { 0 };
+  struct cpu_args *args = NULL;
+  pthread_t *cpus = NULL, loader;
+  struct timer_id_t *loader_event = NULL;
+  struct cpu_args fallback = { 0 };
+  unsigned int started_cpus = 0;
+  int status, loader_started = 0;
+
+  if (argc != 2)
+    {
+      fprintf (stderr, "Usage: os [configuration in input/]\n");
       return 1;
     }
+  status = read_config (argv[1]);
+  if (status != 0)
+    {
+      fprintf (stderr, "Invalid configuration or process input: %d\n", status);
+      return 1;
+    }
+  status = init_memphy (&ram, ram_size, 1);
+  for (int i = 0; i < PAGING_MAX_MMSWP && status == 0; i++)
+    {
+      status = init_memphy (&swaps[i], swap_sizes[i], 1);
+      swap_ptrs[i] = &swaps[i];
+    }
+  if (status == 0)
+    status = init_mm (&kernel_mm, NULL);
+  os.mm = &kernel_mm;
+  os.krnl_pgd = kernel_mm.pgd;
+  os.mram = &ram;
+  os.mswp = swap_ptrs;
+  os.active_mswp = &swaps[0];
+  os.dma_map_buffers = mm_dma_map_buffers;
+  if (status == 0)
+    status = sysbus_bind_ram (&ram);
+  if (status == 0)
+    status = dma_start ();
+  cpus = calloc (cpu_count, sizeof *cpus);
+  args = calloc (cpu_count, sizeof *args);
+  if (cpus == NULL || args == NULL)
+    status = -ENOMEM;
+  if (status == 0)
+    {
+      init_scheduler ();
+      for (unsigned int i = 0; i < cpu_count; i++)
+        {
+          args[i].id = i;
+          args[i].timer = attach_event ();
+          if (args[i].timer == NULL)
+            status = -ENOMEM;
+        }
+      loader_event = attach_event ();
+      fallback.timer = attach_event ();
+      if (loader_event == NULL || fallback.timer == NULL)
+        status = -ENOMEM;
+    }
+  if (status == 0)
+    status = start_timer ();
+  if (status == 0)
+    {
+      int error = pthread_create (&loader, NULL, loader_routine, loader_event);
 
-        /* Create all MEM SWAP */ 
-	int sit;
-	for(sit = 0; sit < PAGING_MAX_MMSWP; sit++)
-	       init_memphy(&mswp[sit], memswpsz[sit], rdmflag);
-
-	/* In Paging mode, it needs passing the system mem to each PCB through loader*/
-	struct mmpaging_ld_args *mm_ld_args = (struct mmpaging_ld_args*)malloc(sizeof(struct mmpaging_ld_args));
-
-	mm_ld_args->mram = (struct memphy_struct *) &mram;
-	mm_ld_args->mswp = (struct memphy_struct**) &mswp;
-	mm_ld_args->active_mswp = (struct memphy_struct *) &mswp[0];
-        mm_ld_args->active_mswp_id = 0;
-
-
-#endif
-
-	/* Init scheduler */
-	init_scheduler();
-
-  /* Start the timer only after DMA initialization has succeeded. */
-  for (i = 0; i < num_cpus; i++) {
-    args[i].timer_id = attach_event();
-    args[i].id = i;
-  }
-  struct timer_id_t *ld_event = attach_event();
-#ifdef MM_PAGING
-  mm_ld_args->timer_id = ld_event;
-#endif
-  start_timer();
-
-	/* Run CPU and loader */
-#ifdef MM_PAGING
-	pthread_create(&ld, NULL, ld_routine, (void*)mm_ld_args);
-#else
-	pthread_create(&ld, NULL, ld_routine, (void*)ld_event);
-#endif
-	for (i = 0; i < num_cpus; i++) {
-		pthread_create(&cpu[i], NULL,
-			cpu_routine, (void*)&args[i]);
-	}
-
-	/* Wait for CPU and loader finishing */
-	for (i = 0; i < num_cpus; i++) {
-		pthread_join(cpu[i], NULL);
-	}
-	pthread_join(ld, NULL);
-
+      if (error != 0)
+        {
+          status = -error;
+          atomic_store (&loader_done, 1);
+          detach_event (loader_event);
+        }
+      else
+        loader_started = 1;
+      for (unsigned int i = 0; i < cpu_count; i++)
+        {
+          error = loader_started
+                      ? pthread_create (&cpus[i], NULL, cpu_routine, &args[i])
+                      : EAGAIN;
+          if (error != 0)
+            {
+              status = -error;
+              detach_event (args[i].timer);
+            }
+          else
+            {
+              args[i].started = 1;
+              started_cpus++;
+            }
+        }
+      /* If thread creation failed for every CPU, drain on the main thread. */
+      if (started_cpus == 0 && loader_started)
+        cpu_routine (&fallback);
+      else
+        detach_event (fallback.timer);
+      for (unsigned int i = 0; i < cpu_count; i++)
+        if (args[i].started)
+          pthread_join (cpus[i], NULL);
+      if (loader_started)
+        pthread_join (loader, NULL);
+    }
+  else if (args != NULL)
+    {
+      for (unsigned int i = 0; i < cpu_count; i++)
+        if (args[i].timer != NULL)
+          detach_event (args[i].timer);
+      if (loader_event != NULL)
+        detach_event (loader_event);
+      if (fallback.timer != NULL)
+        detach_event (fallback.timer);
+    }
   dma_shutdown ();
   handle_dma_interrupt ();
+  stop_timer ();
+  while (os.processes != NULL)
+    {
+      struct pcb_t *process = os.processes;
+
+      if (free_pcb_memph (process) != 0)
+        {
+          mm_unregister_process (process);
+          mm64_destroy (process->mm);
+          atomic_store (&failed, 1);
+        }
+      free (process->mm);
+      unload (process);
+    }
+  finish_scheduler ();
   memory_bank_cleanup ();
-
-	/* Stop timer */
-	stop_timer();
-
-	return 0;
-
+  for (unsigned int i = 0; i < process_count; i++)
+    unload (launches[i].process);
+  mm64_destroy (&kernel_mm);
+  destroy_memphy (&ram);
+  for (int i = 0; i < PAGING_MAX_MMSWP; i++)
+    destroy_memphy (&swaps[i]);
+  free (cpus);
+  free (args);
+  if (status != 0)
+    fprintf (stderr, "OS setup failed: %d\n", status);
+  return status != 0 || atomic_load (&failed) ? 1 : 0;
 }
-
-
-

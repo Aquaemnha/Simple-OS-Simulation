@@ -4,10 +4,12 @@
 #include "common.h"
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
-struct pcb_t * load(const char * path);
+  struct pcb_t *load (const char *path);
+  void unload (struct pcb_t *process);
 
 #ifdef __cplusplus
 }

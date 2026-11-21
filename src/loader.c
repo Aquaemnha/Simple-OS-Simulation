@@ -1,121 +1,117 @@
-
 #include "loader.h"
-#include <stdio.h>
+#include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 
-static uint32_t avail_pid = 1;
+static uint32_t next_pid = 1;
 
-#define OPT_CALC	"calc"
-#define OPT_ALLOC	"alloc"
-#define OPT_FREE	"free"
-#define OPT_READ	"read"
-#define OPT_WRITE	"write"
-#define OPT_SYSCALL	"syscall"
-#define OPT_KMALLOC	            "kmalloc"
-#define OPT_DMA_MEMCPY	        "dma_memcpy"
-#define OPT_COPY_FROM_USER	    "copy_from_user"
-#define OPT_COPY_TO_USER	    "copy_to_user"
-
-static enum ins_opcode_t get_opcode(char * opt) {
-	if (!strcmp(opt, OPT_CALC)) {
-		return CALC;
-	}else if (!strcmp(opt, OPT_ALLOC)) {
-		return ALLOC;
-	}else if (!strcmp(opt, OPT_FREE)) {
-		return FREE;
-	}else if (!strcmp(opt, OPT_READ)) {
-		return READ;
-	}else if (!strcmp(opt, OPT_WRITE)) {
-		return WRITE;
-	}else if (!strcmp(opt, OPT_KMALLOC)) {
-		return KMALLOC;
-	}else if (!strcmp(opt, OPT_COPY_FROM_USER)) {
-		return COPY_FROM_USER;
-	}else if (!strcmp(opt, OPT_COPY_TO_USER)) {
-		return COPY_TO_USER;
-	}else if (!strcmp(opt, OPT_DMA_MEMCPY)) {
-		return DMA_MEMCPY;
-	}else if (!strcmp(opt, OPT_SYSCALL)) {
-		return SYSCALL;
-	}else{
-		printf("get_opcode return Opcode: %s\n", opt);
-		exit(1);
-	}
+void
+unload (struct pcb_t *process)
+{
+  if (process == NULL)
+    return;
+  if (process->code != NULL)
+    {
+      free (process->code->text);
+      free (process->code);
+    }
+  free (process->page_table);
+  free (process);
 }
 
-struct pcb_t * load(const char * path) {
-	/* Create new PCB for the new process */
-	struct pcb_t * proc = (struct pcb_t * )malloc(sizeof(struct pcb_t));
-	proc->pid = avail_pid;
-	avail_pid++;
-	proc->page_table =
-		(struct page_table_t*)malloc(sizeof(struct page_table_t));
-	proc->bp = PAGE_SIZE;
-	proc->pc = 0;
+struct pcb_t *
+load (const char *path)
+{
+  const char *names[] = { "calc",           "alloc",        "free",
+                          "read",           "write",        "kmalloc",
+                          "copy_from_user", "copy_to_user", "dma_memcpy",
+                          "syscall" };
+  const int arguments[] = { 0, 2, 1, 3, 3, 2, 4, 4, 4, 4 };
+  struct pcb_t *process = NULL;
+  FILE *file = fopen (path, "r");
+  char line[256];
+  char *token, *end;
+  uint64_t header[2];
 
-	/* Read process code from file */
-	FILE * file;
-	if ((file = fopen(path, "r")) == NULL) {
-		printf("Cannot find process description at '%s'\n", path);
-		exit(1);		
-	}
-	snprintf(proc->path, sizeof(proc->path), "%s", path);
-	char opcode[32];
-	proc->code = (struct code_seg_t*)malloc(sizeof(struct code_seg_t));
-	fscanf(file, "%u %u", &proc->priority, &proc->code->size);
-	proc->code->text = (struct inst_t*)malloc(
-		sizeof(struct inst_t) * proc->code->size
-	);
-	uint32_t i = 0;
-	char buf[200];
-	for (i = 0; i < proc->code->size; i++) {
-		fscanf(file, "%s", opcode);
-		proc->code->text[i].opcode = get_opcode(opcode);
-		switch(proc->code->text[i].opcode) {
-		case CALC:
-			break;
-		case KMALLOC:
-		case ALLOC:
-			fscanf(
-				file,
-				"" FORMAT_ARG " " FORMAT_ARG "\n",
-				&proc->code->text[i].arg_0,
-				&proc->code->text[i].arg_1
-			);
-			break;
-		case FREE:
-			fscanf(file, "" FORMAT_ARG "\n", &proc->code->text[i].arg_0);
-			break;
-		case READ:
-		case WRITE:
-			fscanf(
-				file,
-				"" FORMAT_ARG " " FORMAT_ARG " " FORMAT_ARG "\n",
-				&proc->code->text[i].arg_0,
-				&proc->code->text[i].arg_1,
-				&proc->code->text[i].arg_2
-			);
-			break;
-		case DMA_MEMCPY:
-		case COPY_FROM_USER:
-		case COPY_TO_USER:
-		case SYSCALL:
-			fgets(buf, sizeof(buf), file);
-			sscanf(buf, "" FORMAT_ARG " " FORMAT_ARG " " FORMAT_ARG " " FORMAT_ARG "",
-			           &proc->code->text[i].arg_0,
-			           &proc->code->text[i].arg_1,
-			           &proc->code->text[i].arg_2,
-			           &proc->code->text[i].arg_3
-			);
-			break;
-		default:
-			printf("Opcode: %s\n", opcode);
-			exit(1);
-		}
-	}
-	return proc;
+  if (file == NULL)
+    return NULL;
+  process = calloc (1, sizeof *process);
+  if (process == NULL)
+    goto fail;
+  process->code = calloc (1, sizeof *process->code);
+  if (process->code == NULL)
+    goto fail;
+  if (fgets (line, sizeof line, file) == NULL)
+    goto fail;
+  token = strtok (line, " \t\r\n");
+  for (int i = 0; i < 2; i++)
+    {
+      if (token == NULL || token[0] < '0' || token[0] > '9')
+        goto fail;
+      errno = 0;
+      header[i] = strtoull (token, &end, 10);
+      if (errno != 0 || *end != '\0')
+        goto fail;
+      token = strtok (NULL, " \t\r\n");
+    }
+  if (token != NULL || header[0] >= MAX_PRIO || header[1] > 1000000)
+    goto fail;
+  process->priority = (uint32_t) header[0];
+  process->code->size = (uint32_t) header[1];
+  if (process->code->size != 0)
+    {
+      process->code->text
+          = calloc (process->code->size, sizeof *process->code->text);
+      if (process->code->text == NULL)
+        goto fail;
+    }
+  for (uint32_t i = 0; i < process->code->size; i++)
+    {
+      char *token, *end;
+      int opcode;
+      arg_t values[4] = { 0 };
+      struct inst_t *instruction = &process->code->text[i];
+
+      if (fgets (line, sizeof line, file) == NULL)
+        goto fail;
+      token = strtok (line, " \t\r\n");
+      if (token == NULL)
+        goto fail;
+      for (opcode = CALC; opcode <= SYSCALL; opcode++)
+        if (strcmp (token, names[opcode]) == 0)
+          break;
+      if (opcode > SYSCALL)
+        goto fail;
+      instruction->opcode = opcode;
+      for (int j = 0; j < arguments[opcode]; j++)
+        {
+          token = strtok (NULL, " \t\r\n");
+          if (token == NULL && opcode == SYSCALL && j > 0)
+            break;
+          if (token == NULL || token[0] == '-')
+            goto fail;
+          errno = 0;
+          values[j] = strtoull (token, &end, 10);
+          if (errno != 0 || end == token || *end != '\0')
+            goto fail;
+        }
+      if (strtok (NULL, " \t\r\n") != NULL)
+        goto fail;
+      instruction->arg_0 = values[0];
+      instruction->arg_1 = values[1];
+      instruction->arg_2 = values[2];
+      instruction->arg_3 = values[3];
+    }
+  while (fgets (line, sizeof line, file) != NULL)
+    if (strspn (line, " \t\r\n") != strlen (line))
+      goto fail;
+  fclose (file);
+  process->pid = next_pid++;
+  snprintf (process->path, sizeof process->path, "%s", path);
+  return process;
+fail:
+  fprintf (stderr, "Cannot load process: %s\n", path);
+  fclose (file);
+  unload (process);
+  return NULL;
 }
-
-
-

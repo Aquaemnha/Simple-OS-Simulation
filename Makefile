@@ -5,7 +5,7 @@
 # personal permission to use and modify the Licensed Source Code
 # for the sole purpose of studying while attending the course CO2018.
 #
-INC = -Iinclude
+INC = -iquote include
 LIB = -lpthread
 
 SRC = src
@@ -108,6 +108,21 @@ dma-cpu-tests: $(OBJ)/dma_cpu_tests.o $(filter-out $(OBJ)/os.o,$(OS_OBJ))
 	./dma_cpu_tests
 
 $(OBJ)/dma_cpu_tests.o: tests/dma_cpu_tests.c $(HEADER) | $(OBJ)
+	$(MAKE) $(CFLAGS) $< -o $@
+
+.PHONY: runtime-tests
+runtime-tests: $(OBJ)/runtime_tests.o $(OBJ)/queue.o $(OBJ)/sched.o $(OBJ)/timer.o
+	$(CC) $(LFLAGS) $^ -o runtime_tests $(LIB)
+	./runtime_tests
+
+$(OBJ)/runtime_tests.o: tests/runtime_tests.c $(HEADER) | $(OBJ)
+	$(MAKE) $(CFLAGS) $< -o $@
+
+.PHONY: os-fault-tests
+os-fault-tests: $(OS_OBJ) $(OBJ)/thread_failures.o
+	$(CXX) $(LFLAGS) $^ -Wl,--wrap=pthread_create -o os_fault_tests $(LIB)
+
+$(OBJ)/thread_failures.o: tests/thread_failures.c | $(OBJ)
 	$(MAKE) $(CFLAGS) $< -o $@
 
 # Compile dma_c_testbench with DMA_MAIN=1 for standalone testbench

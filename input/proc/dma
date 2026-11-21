@@ -1,0 +1,28 @@
+70 27
+alloc 8192 0
+alloc 8192 1
+kmalloc 8192 2
+kmalloc 8192 3
+alloc 16 4
+write 201 0 2
+write 129 0 3
+write 254 0 4095
+write 255 0 4096
+write 77 0 4102
+write 202 0 4103
+copy_from_user 0 2 0 8192
+dma_memcpy 2 3 3 4100
+write 42 4 0
+read 4 0 9
+calc
+copy_to_user 3 1 0 8192
+read 1 2 9
+read 1 3 9
+read 1 4095 9
+read 1 4096 9
+read 1 4102 9
+read 1 4103 9
+free 0
+free 1
+free 2
+free 3
