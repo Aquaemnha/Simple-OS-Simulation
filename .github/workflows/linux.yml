@@ -1,0 +1,36 @@
+name: Linux tests
+
+on:
+  push:
+    branches: [feature/dma-coprocessor]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential python3 verilator
+      - name: Show environment
+        run: |
+          uname -a
+          cat /etc/os-release
+          gcc --version
+          verilator --version
+          git rev-parse HEAD
+      - name: Build
+        run: make -j2 os dma os-fault-tests
+      - name: Run C tests
+        run: make dma-tests dma-cpu-tests runtime-tests
+      - name: Run CLI and OS tests
+        run: python3 -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Run OS demo
+        run: ./os os_dma
