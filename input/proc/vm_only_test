@@ -1,0 +1,15 @@
+10 14
+alloc 128 0
+alloc 256 1
+write 65 0 10
+read 0 10 2
+free 0
+alloc 64 3
+alloc 4096 4
+write 99 4 100
+read 4 100 5
+alloc 20480 6
+write 77 6 500
+read 6 500 7
+kmalloc 512 8
+read 8 0 9

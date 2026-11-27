@@ -1,0 +1,22 @@
+10 21
+alloc 4096 0
+alloc 4096 1
+kmalloc 4096 2
+kmalloc 4096 3
+write 55 0 0
+write 88 0 100
+write 99 0 200
+copy_from_user 0 2 0 4096
+dma_memcpy 2 3 0 4096
+calc
+copy_to_user 3 1 0 4096
+read 1 0 9
+read 1 100 9
+read 1 200 9
+free 0
+free 1
+free 2
+free 3
+calc
+calc
+calc

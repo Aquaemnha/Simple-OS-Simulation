@@ -1,0 +1,19 @@
+10 18
+alloc 1024 0
+alloc 2048 1
+write 12 0 0
+write 34 0 500
+write 78 1 1000
+read 0 0 5
+read 0 500 6
+read 1 1000 7
+free 0
+alloc 512 2
+write 99 2 10
+read 2 10 8
+free 1
+free 2
+calc
+calc
+calc
+calc

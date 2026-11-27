@@ -1,0 +1,14 @@
+1 13
+alloc 256 0
+write 11 0 0
+read 0 0 1
+alloc 8192 2
+write 22 2 4096
+read 2 4096 3
+alloc 32768 4
+write 33 4 16384
+read 4 16384 5
+free 0
+free 2
+free 4
+calc

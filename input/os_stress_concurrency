@@ -1,0 +1,10 @@
+4 4 8
+16777216 0 0 0 0
+0 stress_p0 10
+0 stress_p1 10
+1 stress_p0 20
+1 stress_p1 20
+2 stress_p0 10
+2 stress_p1 10
+3 stress_p0 30
+3 stress_p1 30

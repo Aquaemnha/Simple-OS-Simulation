@@ -1,0 +1,16 @@
+/obj/
+/os
+/os.exe
+/dma_testbench
+/dma_testbench.exe
+/dma_tests
+/dma_tests.exe
+/dma_cpu_tests
+/dma_cpu_tests.exe
+/runtime_tests
+/runtime_tests.exe
+/os_fault_tests
+/os_fault_tests.exe
+/tests/__pycache__/
+*.vcd
+/src/syscalltbl.lst
