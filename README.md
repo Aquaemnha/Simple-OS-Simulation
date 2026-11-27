@@ -1,5 +1,46 @@
-# Simple OS
+# Simple OS (ENGLISH BELOW)
 
+## Kiến Trúc Tổng Quan (Architecture Overview)
+Dự án mô phỏng hệ điều hành đa nhiệm hỗ trợ kiến trúc Multi-CPU (tối đa 50 CPU chạy đồng thời bằng `pthread`), lập lịch đa cấp MLQ (Multi-Level Queue), không gian địa chỉ 64-bit với phân trang 5 cấp (MM64), và co-processor DMA bất đồng bộ tích hợp với mô hình Verilator phần cứng.
+
+## Thiết Kế Vùng Nhớ Phân Loại Theo MacOS (Section 2.2.1)
+Thay vì sử dụng thiết kế phân vùng phẳng Linux-style cũ, hệ thống áp dụng cơ chế phân bổ bộ nhớ kiểu MacOS Virtual Memory Regions nhằm tối ưu hoá cho DMA và quản lý phân mảnh:
+- **Small Region (VMA 0)**: Dành cho các đối tượng dữ liệu nhỏ ($\le 1024$ bytes).
+- **Medium Region (VMA 1)**: Dành cho các khối dữ liệu kích thước trung bình ($1025 - 4096$ bytes).
+- **Large Region (VMA 2)**: Dành cho các khối dữ liệu kích thước lớn ($> 4096$ bytes).
+- **Kernel Region**: Tách biệt hoàn toàn ở không gian địa chỉ cao (`MM64_KERNEL_BASE = 0xffff800000000000`), bảo vệ nghiêm ngặt quyền truy cập từ User Space thông qua các syscall kiểm tra phân quyền (`copy_from_user`, `copy_to_user`).
+
+## Cơ Chế Tương Tác Bất Đồng Bộ Của DMA Co-Processor (Section 2.3)
+Tuân thủ nghiêm ngặt mô hình tương tác I/O chuẩn:
+- **Non-blocking Dispatch**: Lệnh `dma_submit` chỉ nạp yêu cầu (PID, source, destination, length), dành trước bus RAM và báo hiệu cho DMA worker thread chạy ngầm, ngay lập tức trả về cho CPU tiếp tục thực thi các chỉ lệnh tiếp theo mà **không block CPU**.
+- **CPU Độc Lập Thực Thi**: Trong thời gian DMA đang thực hiện truyền dữ liệu, các CPU vẫn tiếp tục fetch và run hàng nghìn lệnh của các process khác (được xác thực thông qua biến đếm `cpu_instructions` trong kết quả test).
+- **Interrupt Handling**: Khi phần cứng DMA hoàn tất, hàm callback `dma_done_callback()` phát tín hiệu ngắt. Tại ranh giới giữa các time slot/chỉ lệnh, CPU gọi `handle_dma_interrupt()` để xử lý sự kiện ngắt và giải phóng tài nguyên. Hệ thống không sử dụng bất kỳ cơ chế "cheat" đồng bộ nào làm treo CPU.
+
+## Cơ Chế Đồng Bộ & Phòng Ngừa Race Condition (Multi-CPU Synchronization)
+Toàn bộ các tài nguyên dùng chung trong hệ thống được bảo vệ bằng các khóa độc lập:
+- `queue_lock`: Đồng bộ truy cập hàng đợi MLQ khi nhiều CPU đồng thời lấy (`get_proc`) hoặc trả (`put_proc`) process.
+- `mmvm_lock`: Bảo vệ toàn vẹn bảng phân trang 5 cấp, bảng process registry, danh sách khung trang (`free_fp_list`, `used_fp_list`).
+- `memory_lock`: Bảo vệ quyền truy cập đọc/ghi vật lý vào RAM bus và các dải địa chỉ vật lý đang dành riêng cho DMA, chống xung đột giữa CPU bus và DMA bus.
+- `channel_lock`: Quản lý vòng đời trạng thái kênh DMA (`DMA_IDLE`, `DMA_QUEUED`, `DMA_RUNNING`, `DMA_COMPLETE`) giữa CPU thread và DMA worker thread.
+- Các mutex được giải phóng ngay sau vùng tranh chấp, tuân thủ thứ tự lock phân cấp nhằm ngăn chặn hoàn toàn nguy cơ Deadlock.
+
+## Hướng Dẫn Biên Dịch & Chạy Kiểm Thử
+- **Biên dịch hệ điều hành và DMA testbench**:
+  ```sh
+  make os dma
+  ```
+- **Chạy toàn bộ test suite (Python Unittest & C Testbench)**:
+  ```sh
+  python3 -m unittest discover -s tests -p 'test_*.py' -v
+  make dma-cpu-tests
+  ```
+- **Chạy mô phỏng hệ điều hành với cấu hình mẫu**:
+  ```sh
+  ./os os_dma
+  ./os os_1_singleCPU_mlq_paging
+  ```
+
+# README.md
 Operating system simulator for CO2018, HK261, based on the supplied
 `hk261_ossim_demacOprx` starter. The DMA driver runs the provided Verilator
 model on a pthread and shares simulated RAM with CPU memory accesses.

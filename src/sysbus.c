@@ -11,8 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* memory_lock protects storage and the active source/destination reservation.
-   bound_ram is borrowed from the OS; only a standalone bank owns storage. */
+/* memory_lock bảo vệ truy cập vật lý vào RAM bus và các dải địa chỉ đang dành cho DMA */
 static pthread_mutex_t memory_lock = PTHREAD_MUTEX_INITIALIZER;
 static unsigned char *storage;
 static size_t capacity;

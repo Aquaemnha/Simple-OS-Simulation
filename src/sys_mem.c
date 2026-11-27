@@ -28,7 +28,8 @@ __sys_memmap (struct krnl_t *kernel, uint32_t pid, struct sc_regs *regs)
     switch (regs->a1)
       {
       case SYSMEM_ALLOC_OP:
-        /* Separate similarly sized user objects into small/medium/large VMAs.
+        /* Phân loại vùng nhớ MacOS-style theo kích thước đối tượng:
+         * Small (<=1024B): VMA 0, Medium (<=4096B): VMA 1, Large (>4096B): VMA 2.
          */
         status = __alloc (caller,
                           regs->a3 <= 1024   ? 0

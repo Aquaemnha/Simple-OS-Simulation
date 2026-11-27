@@ -51,7 +51,7 @@ struct cpu_args
   int started;
 };
 
-/* The retained DPI completion is handled at an instruction boundary. */
+/* Xử lý ngắt DMA khi hoàn tất truyền dữ liệu (interrupt-driven handler) */
 static void
 handle_dma_interrupt (void)
 {

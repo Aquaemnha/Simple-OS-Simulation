@@ -12,6 +12,7 @@
 static struct queue_t ready_queue;
 static struct queue_t running_list;
 static struct queue_t mlq_ready_queue[MAX_PRIO];
+/* queue_lock bảo vệ các hàng đợi MLQ khi có nhiều CPU truy cập đồng thời */
 static pthread_mutex_t queue_lock = PTHREAD_MUTEX_INITIALIZER;
 static unsigned int priority;
 static unsigned int remaining;

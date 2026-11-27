@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* mmvm_lock bảo vệ bảng phân trang, danh sách frame và metadata bộ nhớ dùng chung */
 pthread_mutex_t mmvm_lock = PTHREAD_MUTEX_INITIALIZER;
 
 /* These kernel helpers run under mmvm_lock. User wrappers below pass only

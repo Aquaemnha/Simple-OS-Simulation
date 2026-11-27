@@ -14,8 +14,7 @@ enum channel_state
   DMA_COMPLETE
 };
 
-/* channel_lock protects the descriptor, completion and worker lifecycle.
-   Only the worker accesses the Verilator model; ready reports its startup. */
+/* channel_lock bảo vệ descriptor, trạng thái hoàn tất và vòng đời worker thread */
 static pthread_mutex_t channel_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t channel_changed = PTHREAD_COND_INITIALIZER;
 static pthread_t worker;
@@ -26,7 +25,7 @@ static int stopping;
 static int ready;
 static int init_status;
 
-/* Initialize the model, drain accepted requests and publish their results. */
+/* Khởi tạo mô phỏng Verilator DMA, xử lý request bất đồng bộ trong worker thread */
 static void *
 dma_worker (void *unused)
 {
@@ -120,6 +119,7 @@ dma_start (void)
   return status;
 }
 
+/* Submit DMA transfer bất đồng bộ: không block CPU, chỉ enqueue và đánh thức worker */
 int
 dma_submit (uint32_t pid, uint64_t source, uint64_t destination,
             uint64_t length)
@@ -151,6 +151,7 @@ dma_submit (uint32_t pid, uint64_t source, uint64_t destination,
   return status;
 }
 
+/* Callback từ phần cứng Verilator khi DMA hoàn thành, kích hoạt ngắt (interrupt) */
 void
 dma_done_callback (void)
 {
